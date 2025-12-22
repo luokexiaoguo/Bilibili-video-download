@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1001,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "referer", "operation": "set", "value": "https://www.bilibili.com" },
+        { "header": "origin", "operation": "set", "value": "https://www.bilibili.com" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|hdslb\\.com)\\/",
+      "resourceTypes": ["xmlhttprequest", "media", "other"]
+    }
+  },
+  {
+    "id": 1002,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        { "header": "Access-Control-Allow-Origin", "operation": "set", "value": "*" },
+        { "header": "Access-Control-Allow-Methods", "operation": "set", "value": "GET, POST, OPTIONS, HEAD" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|hdslb\\.com)\\/",
+      "resourceTypes": ["xmlhttprequest", "media", "other"]
+    }
+  }
+]

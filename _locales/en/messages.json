@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "Bilibili Video Downloader",
+    "description": "Extension name"
+  },
+  "shortName": {
+    "message": "BiliDown",
+    "description": "Short extension name"
+  },
+  "appDesc": {
+    "message": "One-click download of Bilibili 4K HD videos, supporting resume and local merging.",
+    "description": "Extension description"
+  }
+}

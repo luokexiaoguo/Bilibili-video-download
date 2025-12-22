@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "B站离线舱",
+    "description": "Extension name"
+  },
+  "shortName": {
+    "message": "B站离线舱",
+    "description": "Short extension name"
+  },
+  "appDesc": {
+    "message": "一键下载 Bilibili 4K 高清视频，支持断点续传与本地合并。",
+    "description": "Extension description"
+  }
+}
