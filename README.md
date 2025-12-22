@@ -8,6 +8,7 @@
 ## ✨ 功能特性
 
 - **高清下载**：支持 Bilibili 4K、1080P+ 等高清画质视频下载。
+- **番剧支持**：全面支持 Bilibili 番剧、电影等 Bangumi 内容的解析与下载。
 - **断点续传**：网络波动不用怕，支持下载任务暂停与恢复。
 - **本地合并**：内置 FFmpeg (Wasm)，下载完成后直接在浏览器内完成音视频轨道合并，输出 MP4 文件。
 - **隐私安全**：所有操作均在本地完成，不收集任何用户个人信息。
@@ -20,7 +21,7 @@
 1.  **下载代码**：
     克隆本仓库或下载 ZIP 包并解压。
     ```bash
-    git clone https://github.com/your-username/bilibili-video-download.git
+    git clone https://github.com/luokexiaoguo/Bilibili-video-download.git
     ```
 
 2.  **打开扩展管理页面**：
@@ -34,7 +35,7 @@
     点击“加载解压缩的扩展”（Load unpacked），选择本项目的根目录（即包含 `manifest.json` 的文件夹）。
 
 5.  **开始使用**：
-    打开任意 Bilibili 视频播放页面，点击浏览器工具栏上的插件图标即可开始使用。
+    打开任意 Bilibili 视频或番剧播放页面，点击浏览器工具栏上的插件图标即可开始使用。
 
 ## 🛠️ 技术栈
 

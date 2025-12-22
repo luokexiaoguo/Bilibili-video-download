@@ -45,8 +45,8 @@ document.getElementById("send").addEventListener("click", async () => {
   const msg = document.getElementById("msg");
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.url || !/bilibili\.com\/video\//i.test(tab.url)) {
-      msg.textContent = "请在 B 站视频播放页使用";
+    if (!tab || !tab.url || !/bilibili\.com\/(video|bangumi\/play)\//i.test(tab.url)) {
+      msg.textContent = "请在 B 站视频或番剧播放页使用";
       return;
     }
     // Inject bridge script (ISOLATED) to handle storage/runtime

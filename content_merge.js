@@ -159,11 +159,59 @@
       };
     }
 
+    // Helper to get BVID from URL or Page State
+    const getBvid = async () => {
+      // 1. Try URL (video)
+      const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
+      if (m) return m[1];
+      
+      // 2. Try URL (bangumi ep)
+      const epMatch = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
+      if (epMatch) {
+        const epId = epMatch[1];
+        try {
+          // Use PGC API to get episode info
+          const res = await fetch(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epId}`);
+          const json = await res.json();
+          const episodes = json?.result?.episodes || [];
+          const targetEp = episodes.find(e => e.id == epId);
+          if (targetEp && targetEp.bvid) return targetEp.bvid;
+        } catch (_) {}
+      }
+
+      // 3. Try URL (bangumi ss)
+      const ssMatch = location.pathname.match(/\/bangumi\/play\/ss(\d+)/i);
+      if (ssMatch) {
+        const seasonId = ssMatch[1];
+        try {
+          const res = await fetch(`https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`);
+          const json = await res.json();
+          // Try to find current episode from user status or default to first
+          // Note: Without login, user_status might be empty, so we default to first ep?
+          // Or we can rely on window.__INITIAL_STATE__ if available.
+          // Let's try to get the first episode's BVID as fallback
+          if (json?.result?.episodes?.length > 0) {
+             return json.result.episodes[0].bvid;
+          }
+        } catch (_) {}
+      }
+      
+      // 4. Try Global State (common in bangumi/video pages)
+      try {
+        if (window.__INITIAL_STATE__) {
+           if (window.__INITIAL_STATE__.bvid) return window.__INITIAL_STATE__.bvid;
+           if (window.__INITIAL_STATE__.epInfo && window.__INITIAL_STATE__.epInfo.bvid) return window.__INITIAL_STATE__.epInfo.bvid;
+           if (window.__INITIAL_STATE__.videoData && window.__INITIAL_STATE__.videoData.bvid) return window.__INITIAL_STATE__.videoData.bvid;
+        }
+      } catch (_) {}
+      return null;
+    };
+
     async function resolveBilibili() {
       const p = window.__playinfo__ || window.playinfo || null;
       if (p && p.dash) return p.dash;
-      const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
-      const bvid = m ? m[1] : "";
+      
+      const bvid = await getBvid();
       if (!bvid) return null;
       try {
         const viewRes = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
@@ -297,8 +345,7 @@
       overlay.setStep("合并失败，尝试 1080P 直链");
       await setStatus({ step: "合并失败，尝试 1080P 直链", progress: 60, detail: reason });
       
-      const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
-      const bvid = m ? m[1] : "";
+      const bvid = await getBvid();
       if (!bvid) throw new Error("无法获取 BVID");
       
       const viewRes = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
