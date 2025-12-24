@@ -1,6 +1,6 @@
 {
   "appName": {
-    "message": "B站离线舱",
+    "message": "B站离线舱-番剧电影下载器",
     "description": "Extension name"
   },
   "shortName": {
@@ -8,7 +8,7 @@
     "description": "Short extension name"
   },
   "appDesc": {
-    "message": "一键下载 Bilibili 4K 高清视频，支持断点续传与本地合并。",
+    "message": "一键下载 Bilibili 4K 高清视频、番剧、电影，支持断点续传与本地合并。",
     "description": "Extension description"
   }
 }

@@ -81,6 +81,8 @@ document.getElementById("send").addEventListener("click", async () => {
       files: ["content_merge.js"],
       world: "MAIN"
     });
+    // 清除旧的状态
+    chrome.storage.local.remove("vd_status");
     msg.textContent = "已启动下载";
   } catch (e) {
     msg.textContent = "启动失败: " + (e && e.message ? e.message : "未知错误");
@@ -89,6 +91,9 @@ document.getElementById("send").addEventListener("click", async () => {
 
 // 轮询展示下载状态
 const statusEl = document.getElementById("status");
+// 每次打开 popup 时先清空显示
+statusEl.textContent = "";
+
 let timer = setInterval(async () => {
   try {
     const { vd_status } = await chrome.storage.local.get("vd_status");

@@ -1,9 +1,9 @@
-# B站离线舱 (BiliDown)
+# B站离线舱-番剧电影下载器 (BiliDown)
 
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-blue)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-**B站离线舱** 是一款基于 Microsoft Edge / Google Chrome 的浏览器扩展，专注于提供 Bilibili 视频的高清下载体验。它利用 WebAssembly 版本的 FFmpeg 在本地进行音视频合并，确保隐私安全，无需将数据上传至第三方服务器。
+**B站离线舱-番剧电影下载器** 是一款基于 Microsoft Edge / Google Chrome 的浏览器扩展，专注于提供 Bilibili 视频、番剧、电影的高清下载体验。它利用 WebAssembly 版本的 FFmpeg 在本地进行音视频合并，确保隐私安全，无需将数据上传至第三方服务器。
 
 ## ✨ 功能特性
 
@@ -83,6 +83,18 @@ e:\Bilibili video download\
     ```bash
     ffmpeg -i "[视频]xxx.m4s" -i "[音频]xxx.m4s" -c copy output.mp4
     ```
+
+## 📅 更新日志 (Changelog)
+
+### v1.1.0 (2025-12-24)
+- **新增**：全面支持 Bilibili 番剧、电影内容的解析与下载。
+- **优化**：大文件下载内存救援机制，当浏览器内存不足时自动提示保存原始轨道。
+- **优化**：改进文件命名规则，自动添加 `[视频]` / `[音频]` 前缀，方便区分。
+- **修复**：修复了部分情况下下载状态显示异常的问题。
+
+### v1.0.0
+- **首发**：支持 Bilibili 普通视频 4K/1080P 高清下载。
+- **核心**：基于 WebAssembly 的本地音视频合并功能。
 
 ## ⚠️ 免责声明
 

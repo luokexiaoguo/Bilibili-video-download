@@ -1,6 +1,6 @@
 {
   "appName": {
-    "message": "Bilibili Video Downloader",
+    "message": "Bilibili Offline Pod - Anime & Movie Downloader",
     "description": "Extension name"
   },
   "shortName": {
@@ -8,7 +8,7 @@
     "description": "Short extension name"
   },
   "appDesc": {
-    "message": "One-click download of Bilibili 4K HD videos, supporting resume and local merging.",
+    "message": "One-click download of Bilibili 4K HD videos, Anime, and Movies, supporting resume and local merging.",
     "description": "Extension description"
   }
 }

@@ -596,24 +596,40 @@
                  }
                  
                  // 3. 如果是视频报错，说明音频还没下。
-                 // 此时是否尝试下载音频？
-                 if (isVideo && aUrl) {
-                     // 用户交互优化：明确询问是否需要下载音频
-                     if (confirm("视频轨道已由于内存不足自动保存。\n\n是否需要继续下载音频轨道？\n(点击“确定”下载音频，点击“取消”结束)")) {
-                         setTimeout(() => {
-                             const aAudio = document.createElement("a");
-                             aAudio.href = aUrl;
-                             aAudio.download = "[音频]" + filename + ".m4s";
-                             document.body.appendChild(aAudio);
-                             aAudio.click();
-                             aAudio.remove();
-                         }, 1000);
-                     }
-                 }
+                  // 此时是否尝试下载音频？
+                  if (isVideo && aUrl) {
+                      // 用户交互优化：明确询问是否需要下载音频
+                      if (confirm("视频轨道已由于内存不足自动保存。\n\n是否需要继续下载音频轨道？\n(点击“确定”下载音频，点击“取消”结束)")) {
+                          // 使用 fetch 下载以确保文件名正确（直接使用 href 会导致跨域文件名失效）
+                          fetch(aUrl, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin" })
+                            .then(res => res.blob())
+                            .then(blob => {
+                                const aAudio = document.createElement("a");
+                                aAudio.href = URL.createObjectURL(blob);
+                                aAudio.download = "[音频]" + filename + ".m4s";
+                                document.body.appendChild(aAudio);
+                                aAudio.click();
+                                aAudio.remove();
+                            })
+                            .catch(() => {
+                                // 如果 fetch 失败（极少情况），回退到直接下载链接（文件名可能会乱，但至少能下）
+                                const aAudio = document.createElement("a");
+                                aAudio.href = aUrl;
+                                aAudio.download = "[音频]" + filename + ".m4s";
+                                document.body.appendChild(aAudio);
+                                aAudio.click();
+                                aAudio.remove();
+                            });
+                      }
+                  }
 
                  window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: { step: "已保存原始轨道", progress: 100, detail: "内存不足以合并，已保存原始数据", done: true } }));
-                 return;
-             }
+                  // 强制关闭悬浮窗
+                  overlay.setStep("已保存原始轨道");
+                  overlay.done();
+                  setTimeout(() => overlay.remove(), 2000);
+                  return;
+              }
           }
           throw eMem;
         }
