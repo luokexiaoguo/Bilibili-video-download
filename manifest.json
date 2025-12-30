@@ -4,11 +4,12 @@
   "short_name": "__MSG_shortName__",
   "description": "__MSG_appDesc__",
   "default_locale": "zh_CN",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "permissions": ["cookies", "activeTab", "tabs", "storage", "downloads", "scripting", "declarativeNetRequest", "declarativeNetRequestWithHostAccess"],
   "host_permissions": [
     "https://*.bilibili.com/*",
     "https://*.bilivideo.com/*",
+    "https://*.bilivideo.cn/*",
     "https://*.hdslb.com/*",
     "http://127.0.0.1:5000/*"
   ],
@@ -26,7 +27,7 @@
       "resources": [
         "ffmpeg/*"
       ],
-      "matches": ["https://*.bilibili.com/*", "https://*.hdslb.com/*"]
+      "matches": ["https://*.bilibili.com/*", "https://*.bilivideo.com/*", "https://*.hdslb.com/*"]
     }
   ],
   "declarative_net_request": {

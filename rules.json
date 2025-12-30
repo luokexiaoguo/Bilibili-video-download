@@ -2,15 +2,15 @@
   {
     "id": 1001,
     "priority": 1,
-    "action": {
-      "type": "modifyHeaders",
-      "requestHeaders": [
-        { "header": "referer", "operation": "set", "value": "https://www.bilibili.com" },
-        { "header": "origin", "operation": "set", "value": "https://www.bilibili.com" }
+      "action": {
+        "type": "modifyHeaders",
+        "requestHeaders": [
+        { "header": "referer", "operation": "set", "value": "https://www.bilibili.com/" },
+        { "header": "origin", "operation": "remove" }
       ]
     },
     "condition": {
-      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|hdslb\\.com)\\/",
+      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|bilivideo\\.cn|hdslb\\.com)\\/",
       "resourceTypes": ["xmlhttprequest", "media", "other"]
     }
   },
@@ -25,8 +25,22 @@
       ]
     },
     "condition": {
-      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|hdslb\\.com)\\/",
+      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|bilivideo\\.cn|hdslb\\.com)\\/",
       "resourceTypes": ["xmlhttprequest", "media", "other"]
+    }
+  },
+  {
+    "id": 1003,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "responseHeaders": [
+        { "header": "Content-Security-Policy", "operation": "remove" }
+      ]
+    },
+    "condition": {
+      "regexFilter": "https:\\/\\/(?:[^\\/]*\\.)?bilibili\\.com\\/",
+      "resourceTypes": ["main_frame", "sub_frame"]
     }
   }
 ]

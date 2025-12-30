@@ -1,120 +1,188 @@
 (async () => {
   try {
-    const setStatus = async (payload) => {
-      window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: payload }));
-    };
-    // Global abort controller for cancellation
+    console.log("[BilibiliDownloader] Script started");
+
+    // 1. Overlay UI Component
+    const overlay = (() => {
+      try {
+        const el = document.createElement("div");
+        el.id = "bili-download-overlay";
+        el.style.position = "fixed";
+        el.style.right = "16px";
+        el.style.bottom = "16px";
+        el.style.zIndex = "2147483647"; // Max Z-Index
+        el.style.background = "rgba(0,0,0,0.85)";
+        el.style.color = "#fff";
+        el.style.font = "14px/1.6 system-ui, -apple-system, Segoe UI, sans-serif";
+        el.style.padding = "16px";
+        el.style.borderRadius = "8px";
+        el.style.boxShadow = "0 4px 12px rgba(0,0,0,0.5)";
+        el.style.minWidth = "260px";
+        el.style.maxWidth = "360px";
+        el.style.userSelect = "none";
+        
+        // Draggable
+        el.style.cursor = "move";
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+        
+        el.addEventListener("mousedown", (e) => {
+          if (e.target.tagName === "BUTTON" || e.target.style.cursor === "pointer") return;
+          isDragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          const rect = el.getBoundingClientRect();
+          initialLeft = rect.left;
+          initialTop = rect.top;
+          el.style.right = "auto";
+          el.style.bottom = "auto";
+          el.style.left = initialLeft + "px";
+          el.style.top = initialTop + "px";
+          e.preventDefault();
+        });
+
+        window.addEventListener("mousemove", (e) => {
+          if (!isDragging) return;
+          el.style.left = (initialLeft + (e.clientX - startX)) + "px";
+          el.style.top = (initialTop + (e.clientY - startY)) + "px";
+        });
+
+        window.addEventListener("mouseup", () => isDragging = false);
+
+        // UI Elements
+        const titleDiv = document.createElement("div");
+        titleDiv.style.fontWeight = "bold";
+        titleDiv.style.marginBottom = "8px";
+        titleDiv.style.borderBottom = "1px solid rgba(255,255,255,0.2)";
+        titleDiv.style.paddingBottom = "4px";
+        titleDiv.textContent = "B站离线舱";
+        el.appendChild(titleDiv);
+
+        const stepDiv = document.createElement("div");
+        stepDiv.textContent = "初始化中...";
+        el.appendChild(stepDiv);
+
+        const barContainer = document.createElement("div");
+        barContainer.style.marginTop = "8px";
+        barContainer.style.height = "6px";
+        barContainer.style.background = "rgba(255,255,255,0.2)";
+        barContainer.style.borderRadius = "3px";
+        barContainer.style.overflow = "hidden";
+        
+        const barDiv = document.createElement("div");
+        barDiv.style.height = "100%";
+        barDiv.style.width = "0%";
+        barDiv.style.background = "#00aeec";
+        barDiv.style.transition = "width 0.2s";
+        barContainer.appendChild(barDiv);
+        el.appendChild(barContainer);
+
+        const detailDiv = document.createElement("div");
+        detailDiv.style.marginTop = "8px";
+        detailDiv.style.fontSize = "12px";
+        detailDiv.style.opacity = "0.8";
+        detailDiv.style.wordBreak = "break-all";
+        el.appendChild(detailDiv);
+        
+        // Buttons Area
+        const btnArea = document.createElement("div");
+        btnArea.style.marginTop = "12px";
+        btnArea.style.display = "flex";
+        btnArea.style.justifyContent = "flex-end";
+        btnArea.style.gap = "10px";
+        el.appendChild(btnArea);
+
+        // Helper to create button
+        const createBtn = (text, color, onClick) => {
+            const btn = document.createElement("button");
+            btn.textContent = text;
+            btn.style.background = "transparent";
+            btn.style.border = "none";
+            btn.style.color = color;
+            btn.style.cursor = "pointer";
+            btn.style.fontSize = "12px";
+            btn.style.padding = "0";
+            btn.style.textDecoration = "underline";
+            btn.onclick = onClick;
+            return btn;
+        };
+
+        const cancelBtn = createBtn("取消", "#ff6b6b", () => {
+            if (confirm("确定要取消下载吗？")) {
+                controller.abort();
+                el.remove();
+            }
+        });
+        btnArea.appendChild(cancelBtn);
+
+        document.body.appendChild(el);
+        
+        const updateStatus = (data) => {
+            try { window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: data })); } catch(_) {}
+        };
+
+        return {
+          setStep: (t) => { 
+              stepDiv.textContent = t; 
+              updateStatus({ step: t }); 
+          },
+          setProgress: (p) => { 
+              barDiv.style.width = Math.max(0, Math.min(100, p)) + "%";
+              updateStatus({ progress: Math.round(p) }); 
+          },
+          setDetail: (t) => { 
+              detailDiv.textContent = t; 
+              updateStatus({ detail: t });
+          },
+          addBtn: (text, onClick) => {
+             const btn = createBtn(text, "#4cc9f0", onClick);
+             btn.style.marginRight = "8px";
+             btn.style.textDecoration = "none";
+             btn.style.background = "rgba(255,255,255,0.1)";
+             btn.style.padding = "2px 8px";
+             btn.style.borderRadius = "4px";
+             btnArea.insertBefore(btn, cancelBtn);
+             return btn;
+          },
+          done: () => {
+             cancelBtn.textContent = "关闭";
+             cancelBtn.style.color = "#fff";
+             cancelBtn.style.textDecoration = "none";
+             cancelBtn.onclick = () => el.remove();
+             updateStatus({ done: true });
+          },
+          remove: () => {
+              el.remove();
+              updateStatus({ done: true });
+          }
+        };
+      } catch (e) {
+        alert("UI初始化失败: " + e.message);
+        throw e;
+      }
+    })();
+
+    // Global abort controller
     const controller = new AbortController();
     const signal = controller.signal;
-    
-    const overlay = (() => {
-      const el = document.createElement("div");
-      el.style.position = "fixed";
-      el.style.right = "16px";
-      el.style.bottom = "16px";
-      el.style.zIndex = "999999";
-      el.style.background = "rgba(0,0,0,0.75)";
-      el.style.color = "#fff";
-      el.style.font = "14px/1.6 system-ui,Segoe UI,Arial";
-      el.style.padding = "12px 14px";
-      el.style.borderRadius = "10px";
-      el.style.boxShadow = "0 6px 20px rgba(0,0,0,0.3)";
-      
-      el.style.cursor = "move"; // Indicate draggable
 
-      // Drag logic
-      let isDragging = false;
-      let startX, startY, initialLeft, initialTop;
-
-      el.addEventListener("mousedown", (e) => {
-        // Prevent default to avoid text selection etc
-        // But allow clicking the cancel button? Cancel button has its own click handler which should fire.
-        if (e.target.textContent === "取消下载") return; 
-        
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        
-        const rect = el.getBoundingClientRect();
-        initialLeft = rect.left;
-        initialTop = rect.top;
-        
-        // Switch to explicit left/top for positioning
-        el.style.right = "auto";
-        el.style.bottom = "auto";
-        el.style.left = initialLeft + "px";
-        el.style.top = initialTop + "px";
-        
-        e.preventDefault(); 
-      });
-
-      window.addEventListener("mousemove", (e) => {
-        if (!isDragging) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        el.style.left = (initialLeft + dx) + "px";
-        el.style.top = (initialTop + dy) + "px";
-      });
-
-      window.addEventListener("mouseup", () => {
-        isDragging = false;
-      });
-
-      const stepDiv = document.createElement("div");
-      stepDiv.id = "vd-step";
-      stepDiv.textContent = "准备中...";
-      el.appendChild(stepDiv);
-
-      const barContainer = document.createElement("div");
-      barContainer.style.marginTop = "6px";
-      barContainer.style.width = "280px";
-      barContainer.style.background = "#333";
-      barContainer.style.borderRadius = "6px";
-      barContainer.style.overflow = "hidden";
-      
-      const barDiv = document.createElement("div");
-      barDiv.id = "vd-bar";
-      barDiv.style.height = "8px";
-      barDiv.style.width = "0";
-      barDiv.style.background = "#00aeec";
-      barContainer.appendChild(barDiv);
-      el.appendChild(barContainer);
-
-      const detailDiv = document.createElement("div");
-      detailDiv.id = "vd-detail";
-      detailDiv.style.marginTop = "6px";
-      detailDiv.style.opacity = ".9";
-      el.appendChild(detailDiv);
-      
-      // Cancel Button
-      const cancelBtn = document.createElement("div");
-      cancelBtn.textContent = "取消下载";
-      cancelBtn.style.marginTop = "8px";
-      cancelBtn.style.textAlign = "right";
-      cancelBtn.style.fontSize = "12px";
-      cancelBtn.style.color = "#ff6b6b";
-      cancelBtn.style.cursor = "pointer";
-      cancelBtn.style.textDecoration = "underline";
-      cancelBtn.onclick = () => {
-        controller.abort();
-        el.remove();
-        window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: { step: "已取消", progress: 0, detail: "用户取消下载", error: true } }));
-      };
-      el.appendChild(cancelBtn);
-
-      document.body.appendChild(el);
-      
-      return {
-        setStep: (t) => (stepDiv.textContent = t),
-        setProgress: (p) => (barDiv.style.width = Math.max(0, Math.min(100, p)) + "%"),
-        setDetail: (t) => (detailDiv.textContent = t),
-        done: () => {
-           el.style.background = "rgba(0,0,0,0.55)";
-           cancelBtn.style.display = "none";
-        },
-        remove: () => el.remove()
-      };
-    })();
+    // Utils
+    const fetchWithTimeout = async (resource, options = {}) => {
+      const { timeout = 8000 } = options;
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      try {
+        const response = await fetch(resource, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+      } catch (error) {
+        clearTimeout(id);
+        throw error;
+      }
+    };
 
     const fmtBytes = (n) => {
       if (!n && n !== 0) return "";
@@ -128,54 +196,26 @@
       return (m > 0 ? m + "分" : "") + ss + "秒";
     };
 
-
-    async function resolveYouTube() {
-      let playerResponse = window.ytInitialPlayerResponse;
-      if (!playerResponse) {
-           const html = document.documentElement.innerHTML;
-           const match = html.match(/var ytInitialPlayerResponse = ({.*?});/);
-           if (match) {
-               try { playerResponse = JSON.parse(match[1]); } catch(e){}
-           }
-      }
-      if (!playerResponse || !playerResponse.streamingData) return null;
-      
-      const formats = playerResponse.streamingData.adaptiveFormats;
-      if (!formats) return null;
-      
-      // Filter video (mp4) and audio (mp4/m4a)
-      const videos = formats.filter(f => f.mimeType.includes("video/mp4") && f.url);
-      const audios = formats.filter(f => f.mimeType.includes("audio/mp4") && f.url);
-      
-      if (!videos.length || !audios.length) return null;
-      
-      // Pick best quality by bitrate
-      videos.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      
-      return {
-          video: videos[0].url,
-          audio: audios[0].url
-      };
-    }
-
-    // Helper to get BVID from URL or Page State
+    // 2. Bilibili Resolver
     const getBvid = async () => {
       // 1. Try URL (video)
       const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
-      if (m) return m[1];
+      if (m) return { bvid: m[1], cid: null };
       
       // 2. Try URL (bangumi ep)
       const epMatch = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
       if (epMatch) {
         const epId = epMatch[1];
         try {
-          // Use PGC API to get episode info
-          const res = await fetch(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epId}`);
+          const res = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epId}`);
           const json = await res.json();
+          // Debug log
+          console.log("Bangumi EP Info:", json);
           const episodes = json?.result?.episodes || [];
           const targetEp = episodes.find(e => e.id == epId);
-          if (targetEp && targetEp.bvid) return targetEp.bvid;
+          if (targetEp && targetEp.bvid) return { bvid: targetEp.bvid, cid: targetEp.cid, epId: epId };
+          // If not found in episodes list (sometimes sections?), fallback to result.bvid if available?
+          // But result usually has main section bvid.
         } catch (_) {}
       }
 
@@ -184,540 +224,673 @@
       if (ssMatch) {
         const seasonId = ssMatch[1];
         try {
-          const res = await fetch(`https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`);
+          const res = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`);
           const json = await res.json();
-          // Try to find current episode from user status or default to first
-          // Note: Without login, user_status might be empty, so we default to first ep?
-          // Or we can rely on window.__INITIAL_STATE__ if available.
-          // Let's try to get the first episode's BVID as fallback
+          console.log("Bangumi SS Info:", json);
           if (json?.result?.episodes?.length > 0) {
-             return json.result.episodes[0].bvid;
+             // Find the first episode or currently active? 
+             // Without ep_id in URL, it usually defaults to first or history.
+             // We just take the first one for now as a fallback.
+             const ep = json.result.episodes[0];
+             return { bvid: ep.bvid, cid: ep.cid, epId: ep.id };
           }
         } catch (_) {}
       }
-      
-      // 4. Try Global State (common in bangumi/video pages)
+
+      // 4. Try Global State
       try {
         if (window.__INITIAL_STATE__) {
-           if (window.__INITIAL_STATE__.bvid) return window.__INITIAL_STATE__.bvid;
-           if (window.__INITIAL_STATE__.epInfo && window.__INITIAL_STATE__.epInfo.bvid) return window.__INITIAL_STATE__.epInfo.bvid;
-           if (window.__INITIAL_STATE__.videoData && window.__INITIAL_STATE__.videoData.bvid) return window.__INITIAL_STATE__.videoData.bvid;
+           const s = window.__INITIAL_STATE__;
+           if (s.bvid) return { bvid: s.bvid, cid: s.cid };
+           if (s.epInfo && s.epInfo.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: s.epInfo.id };
+           if (s.videoData && s.videoData.bvid) return { bvid: s.videoData.bvid, cid: s.videoData.cid };
         }
       } catch (_) {}
+      
       return null;
     };
 
     async function resolveBilibili() {
-      const p = window.__playinfo__ || window.playinfo || null;
+      // Priority 1: Window Objects
+      const p = window.__playinfo__ || window.playinfo;
       if (p && p.dash) return p.dash;
       
-      const bvid = await getBvid();
-      if (!bvid) return null;
+      // Priority 2: HTML Scraping (if window object missing)
       try {
-        const viewRes = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
-        const viewJson = await viewRes.json();
-        const vd = viewJson?.data || {};
-        const cid = vd.cid || (vd.pages && vd.pages[0] && vd.pages[0].cid) || 0;
+          const html = document.body.innerHTML;
+          const m = html.match(/window\.__playinfo__=({.*?})/);
+          if (m) {
+              const data = JSON.parse(m[1]);
+              if (data && data.data && data.data.dash) return data.data.dash;
+          }
+      } catch(_) {}
+
+      // Priority 3: API Fetch
+      const info = await getBvid();
+      if (!info || !info.bvid) return null;
+      
+      const { bvid, epId } = info;
+      let { cid } = info;
+
+      try {
+        if (!cid) {
+            const viewRes = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
+            const viewJson = await viewRes.json();
+            const vd = viewJson?.data || {};
+            cid = vd.cid || (vd.pages && vd.pages[0] && vd.pages[0].cid) || 0;
+        }
+        
         if (!cid) return null;
-        const playRes = await fetch(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
-        const playJson = await playRes.json();
-        const data = playJson?.data || {};
+
+        // Try UGC API
+        let playRes = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
+        let playJson = await playRes.json();
+        let data = playJson?.data || {};
+        
+        // Try PGC API
+        if (!data.dash) {
+             let pgcUrl = `https://api.bilibili.com/pgc/player/web/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`;
+             if (epId) pgcUrl += `&ep_id=${epId}`;
+             
+             playRes = await fetchWithTimeout(pgcUrl, { credentials: "include" });
+             playJson = await playRes.json();
+             data = playJson?.result || {};
+        }
+
         if (data.dash) return data.dash;
         return null;
-      } catch (_) {
+      } catch (e) {
+        console.warn("Resolve Bilibili Error", e);
         return null;
       }
     }
 
-    const pickBestBilibili = (arr) => {
+    const pickBest = (arr) => {
       if (!arr || arr.length === 0) return null;
-      let maxId = 0;
-      for (const x of arr) { if ((x.id || 0) > maxId) maxId = x.id || 0; }
-      const candidates = arr.filter(x => (x.id || 0) === maxId);
-      let best = candidates[0];
-      for (const x of candidates) {
-        if ((x.bandwidth || 0) > (best.bandwidth || 0)) best = x;
-      }
-      return best.baseUrl || best.base_url || best.backupUrl?.[0];
+      // Sort by ID (quality) descending
+      arr.sort((a, b) => (b.id || 0) - (a.id || 0));
+      // Pick highest quality group
+      const maxId = arr[0].id;
+      const candidates = arr.filter(x => x.id === maxId);
+      // Sort by bandwidth descending
+      candidates.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
+      const best = candidates[0];
+      return best.baseUrl || best.base_url || best.url || (best.backupUrl && best.backupUrl[0]);
     };
 
-    let vUrl, aUrl, filename;
-    const dash = await resolveBilibili();
-    if (!dash) {
-      overlay.setStep("未找到 Bilibili 播放信息");
-      await setStatus({ step: "未找到播放信息", progress: 0, detail: "可能需要登录或会员权限" });
-      return;
-    }
-    vUrl = pickBestBilibili(dash.video);
-    aUrl = pickBestBilibili(dash.audio);
-    filename = (document.title || "bilibili").replace(/[\\/:*?\"<>|]/g, "");
+    const isHdrOrDolbyVideo = (x) => {
+      if (!x) return false;
+      const id = Number(x.id);
+      if (id === 125 || id === 126) return true;
+      const cs = String(x.color_space || x.colorSpace || "");
+      if (/2020|bt2020/i.test(cs)) return true;
+      if (/709|bt709/i.test(cs)) return false;
+      const tc = x.transfer_characteristics ?? x.transferCharacteristics ?? x.trc ?? x.transfer;
+      if (tc === 16 || tc === 18) return true;
+      const sig = JSON.stringify({
+        codecs: x.codecs,
+        mimeType: x.mimeType,
+        frameRate: x.frame_rate || x.frameRate,
+        hdr: x.hdr || x.hdr_type || x.hdrType,
+        dovi: x.dovi || x.dolby_vision || x.dolbyVision,
+        color: x.color_space || x.colorSpace || x.color_primaries || x.colorPrimaries || x.transfer_characteristics || x.transferCharacteristics || x.matrix_coefficients || x.matrixCoefficients
+      });
+      return /dolby|vision|dovi|dvhe|dvh1|hdr|hlg|pq|smpte2084|arib-std-b67|bt2020/i.test(sig);
+    };
 
-    if (!vUrl || !aUrl) {
-      overlay.setStep("未获取到音视频地址");
-      await setStatus({ step: "未获取到音视频地址", progress: 0, detail: "" });
-      return;
-    }
+    const pickBestVideoUrl = (arr) => {
+      if (!arr || arr.length === 0) return null;
+      const nonDrm = arr.filter((x) => {
+        const v = x && (x.drm_tech_type ?? x.drmTechType ?? x.is_drm ?? x.isDrm);
+        return !(Number(v) > 0 || v === true);
+      });
+      const pool = nonDrm.length ? nonDrm : arr;
+      const sdrPool = pool.filter((x) => !isHdrOrDolbyVideo(x));
+      const finalPool = sdrPool.length ? sdrPool : [];
+      if (!finalPool.length) return null;
 
-    async function fetchWithProgress(u, label) {
-      // referrerPolicy: "strict-origin-when-cross-origin" handles generic cases
-      // rules.json handles specific header injection for bilibili domains
-      const r = await fetch(u, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin", signal });
-      if (!r.ok) throw new Error(label + "拉取失败: " + r.status);
-      const total = Number(r.headers.get("content-length")) || 0;
-      const reader = r.body?.getReader?.();
-      if (!reader) {
-        const b = await r.arrayBuffer();
-        return new Uint8Array(b);
-      }
-      
-      let out;
-      let loaded = 0;
-      let chunks = null;
-      
-      if (total) {
-        // Optimization: Pre-allocate memory if size is known
-        try {
-           out = new Uint8Array(total);
-        } catch (eAlloc) {
-           throw new Error("内存不足，无法分配 " + fmtBytes(total) + " 空间: " + eAlloc.message);
-        }
-      } else {
-        chunks = [];
-      }
-
-      const start = performance.now();
-      overlay.setStep(`正在下载${label}...`);
-      overlay.setDetail(total ? `大小 ${fmtBytes(total)}` : "大小未知");
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        if (out) {
-          // Direct write to pre-allocated buffer
-          if (loaded + value.length > out.length) {
-             // Should not happen if content-length is correct, but just in case
-             // If it happens, we might need to resize (expensive) or just fail
-             // For now, let's assume content-length is reliable for Bilibili
-             throw new Error("下载数据超出预期大小");
-          }
-          out.set(value, loaded);
-        } else {
-          chunks.push(value);
-        }
-        
-        loaded += value.length;
-
-        if (total) {
-          const p = (loaded / total) * 50; 
-          overlay.setProgress(p);
-          const elapsed = (performance.now() - start) / 1000;
-          const speed = loaded / elapsed;
-          const eta = total ? (total - loaded) / speed : 0;
-          overlay.setDetail(`已下载 ${fmtBytes(loaded)} / ${fmtBytes(total)}，速度 ${fmtBytes(speed)}/s，剩余约 ${fmtTime(eta)}`);
-          await setStatus({ step: `正在下载${label}`, progress: Math.round(p), detail: `已下载 ${fmtBytes(loaded)} / ${fmtBytes(total)}，速度 ${fmtBytes(speed)}/s，剩余约 ${fmtTime(eta)}` });
-        } else {
-          overlay.setDetail(`已下载 ${fmtBytes(loaded)}`);
-          await setStatus({ step: `正在下载${label}`, progress: 0, detail: `已下载 ${fmtBytes(loaded)}` });
-        }
-      }
-      
-      if (!out) {
-        out = new Uint8Array(loaded);
-        let offset = 0;
-        for (const c of chunks) { out.set(c, offset); offset += c.length; }
-      }
-      
-      return out;
-    }
-
-    // 加载 FFmpeg (提前加载以利用流式写入)
-    let createFFmpeg, ffmpeg;
-    const loadFFmpeg = async () => {
-       overlay.setStep("正在加载核心组件...");
-       const tLoadStart = performance.now();
-       
-       // Helper to load script via DOM tag
-       const loadScript = (url) => {
-        return new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = url;
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("Script load failed: " + url));
-          document.head.appendChild(s);
-        });
+      const isHevc = (x) => {
+        const c = String(x.codecs || "");
+        return x.codecid === 12 || /hev1|hvc1/i.test(c);
+      };
+      const isAvc = (x) => {
+        const c = String(x.codecs || "");
+        return x.codecid === 7 || /avc1/i.test(c);
       };
 
-      try {
-        const coreUrl = window.__FFMPEG_CORE_URL__;
-        
-        // 1. Check if already loaded
-        if (window.FFmpeg && window.FFmpeg.createFFmpeg) {
-           createFFmpeg = window.FFmpeg.createFFmpeg;
-        } 
-        // 2. If not, try to load using the injected URL
-        else {
-           const ffUrl = window.__FFMPEG_URL__;
-           if (ffUrl) {
-             try {
-               await loadScript(ffUrl);
-               createFFmpeg = window.FFmpeg?.createFFmpeg;
-             } catch(e) { 
-               console.warn("Script tag injection failed, trying dynamic import...", e);
-               // 3. Last resort: dynamic import (might fail due to CSP)
-               await import(ffUrl);
-               createFFmpeg = window.FFmpeg?.createFFmpeg;
-             }
-           }
-        }
-        
-        if (!createFFmpeg) throw new Error("Could not find createFFmpeg");
+      const hevc = finalPool.filter(isHevc);
+      if (hevc.length) return pickBest(hevc);
 
-        ffmpeg = createFFmpeg({
-          corePath: coreUrl,
-          log: false
-        });
-        await ffmpeg.load();
-      } catch (e) {
-        console.warn("Local FFmpeg failed, trying CDN...", e);
-        // Fallback to CDN (Single Threaded Version to avoid SharedArrayBuffer issues)
-        await import("https://unpkg.com/@ffmpeg/ffmpeg@0.11.2/dist/ffmpeg.min.js");
-        createFFmpeg = window.FFmpeg.createFFmpeg;
-        ffmpeg = createFFmpeg({
-          corePath: "https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js",
-          log: false,
-          mainName: 'main' 
-        });
-        await ffmpeg.load();
-      }
-      const tLoad = (performance.now() - tLoadStart) / 1000;
-      await setStatus({ step: "核心组件加载完成", progress: 5, detail: `用时 ${fmtTime(tLoad)}` });
-      return ffmpeg;
+      const avc = finalPool.filter(isAvc);
+      if (avc.length) return pickBest(avc);
+
+      return pickBest(finalPool);
     };
 
-    // 流式下载并写入 FFmpeg FS
-    async function fetchToFFmpeg(u, label, fsFilename) {
-      const r = await fetch(u, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin", signal });
-      if (!r.ok) throw new Error(label + "拉取失败: " + r.status);
-      
-      const total = Number(r.headers.get("content-length")) || 0;
-      const reader = r.body?.getReader?.();
-      if (!reader) throw new Error("无法获取流式读取器");
+    const getAllUrls = (track) => {
+      if (!track) return [];
+      const out = [];
+      const push = (u) => { if (u && !out.includes(u)) out.push(u); };
+      push(track.baseUrl || track.base_url || track.url);
+      const b = track.backupUrl || track.backup_url;
+      if (Array.isArray(b)) for (const u of b) push(u);
+      return out;
+    };
 
-      // Open file in FFmpeg MEMFS
-      // FS.open(path, flags, mode) -> flags: 'w' (write) is not direct int. 
-      // Usually in Emscripten FS: 'w' needs to be translated or use high level if possible.
-      // But ffmpeg.FS only exposes writeFile (all at once).
-      // We need to use the underlying FS object if available, OR simple append workaround.
-      // FFmpeg.wasm v0.11.x exposes FS via ffmpeg.FS(method, ...args) but it maps to MEMFS.
-      // There isn't a stream writer exposed easily in v0.11.x high level API.
-      // WORKAROUND: We can use `ffmpeg.FS('writeFile', name, data)` but that overwrites.
-      // We need to access the Emscripten FS directly. 
-      // Luckily, createFFmpeg usually doesn't expose raw FS easily.
-      // BUT, we can use a simpler approach: 
-      // If we cannot stream-write to FFmpeg, we are still bound by JS memory if we buffer in JS.
-      
-      // WAIT! We can try to access the FS via internal property if possible, OR
-      // We accept that we might need to rely on the browser's separate download if it's too huge.
-      // However, the user specifically asked for a way to MERGE huge files.
-      
-      // Let's try to simulate stream writing:
-      // Since we can't easily stream-write to FFmpeg.wasm v0.11 without hacks,
-      // We will stick to the "Fallback to separate download" for super huge files,
-      // BUT we can optimize the "Save" part using File System Access API.
-      
-      // RE-EVALUATION: The user's error "Array buffer allocation failed" happens at `new Uint8Array(total)`.
-      // This is because we try to allocate 100% of the file size in one go.
-      // If we use an array of chunks (List<Uint8Array>), we avoid one huge contiguous allocation.
-      // FFmpeg.wasm `writeFile` accepts `Uint8Array`.
-      // If we pass a huge Uint8Array to `writeFile`, it copies it to Wasm memory.
-      // This copy operation might also crash if Wasm memory is full.
-      
-      // Best Effort Approach:
-      // 1. Keep chunks in a list (don't merge to one Uint8Array in JS).
-      // 2. This avoids the `new Uint8Array(total)` crash.
-      // 3. When writing to FFmpeg, we unfortunately need to pass a buffer.
-      //    But maybe we can write chunks?
-      //    ffmpeg.FS doesn't support append.
-      //    However, we can overwrite? No.
-      
-      // Let's try to access the Emscripten FS.
-      // Usually `ffmpeg.FS` IS the Emscripten FS interface in some versions.
-      // If `ffmpeg.FS('open', ...)` works, we are golden.
-      // Let's try to use the chunk-list approach first to solve the JS allocation error.
-      
-      // OOM Fix Phase 1: Avoid `new Uint8Array(total)`. Use chunk list.
-      // But `ffmpeg.FS('writeFile', ...)` expects data.
-      // If we construct a Blob from chunks, and then read arrayBuffer? Still creates huge buffer.
-      
-      // Let's assume we can only solve the JS side allocation.
-      // We will store chunks in an array.
-      // Then we use `ffmpeg.FS('writeFile', filename, ...)` 
-      // The `data` argument for writeFile can be a Uint8Array.
-      // Creating that Uint8Array is what crashes.
-      
-      // Is there a way to write partial?
-      // No standard API in v0.11.
-      
-      // OK, Plan B:
-      // We will download chunks.
-      // We will try to merge them into a Uint8Array ONLY when passing to FFmpeg.
-      // This delays the crash but doesn't solve it.
-      
-      // Let's implement the Chunk List approach to replace the pre-allocation approach.
-      // It is safer than `new Uint8Array(2GB)`.
-      
-      let loaded = 0;
-      const chunks = [];
-      const start = performance.now();
-      overlay.setStep(`正在下载${label}...`);
-      overlay.setDetail(total ? `大小 ${fmtBytes(total)}` : "大小未知");
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
+    const getVideoUrlCandidates = (arr) => {
+      if (!arr || arr.length === 0) return [];
+      const byId = new Map();
+      for (const t of arr) {
+        const id = t && t.id != null ? Number(t.id) : 0;
+        if (!byId.has(id)) byId.set(id, []);
+        byId.get(id).push(t);
+      }
 
-        if (total) {
-          const p = (loaded / total) * 50; 
-          overlay.setProgress(p);
-          const elapsed = (performance.now() - start) / 1000;
-          const speed = loaded / elapsed;
-          const eta = total ? (total - loaded) / speed : 0;
-          overlay.setDetail(`已下载 ${fmtBytes(loaded)} / ${fmtBytes(total)}，速度 ${fmtBytes(speed)}/s，剩余约 ${fmtTime(eta)}`);
-          await setStatus({ step: `正在下载${label}`, progress: Math.round(p), detail: `已下载 ${fmtBytes(loaded)} / ${fmtBytes(total)}，速度 ${fmtBytes(speed)}/s，剩余约 ${fmtTime(eta)}` });
-        } else {
-          overlay.setDetail(`已下载 ${fmtBytes(loaded)}`);
-          await setStatus({ step: `正在下载${label}`, progress: 0, detail: `已下载 ${fmtBytes(loaded)}` });
+      const ids = Array.from(byId.keys()).sort((a, b) => b - a);
+      const out = [];
+      for (const id of ids) {
+        const tracksAll = byId.get(id) || [];
+        const tracksNonDrm = tracksAll.filter((t) => {
+          const v = t && (t.drm_tech_type ?? t.drmTechType ?? t.is_drm ?? t.isDrm);
+          return !(Number(v) > 0 || v === true);
+        });
+        const tracksNoHdr = (tracksNonDrm.length ? tracksNonDrm : tracksAll).filter((t) => !isHdrOrDolbyVideo(t));
+        const tracks = tracksNoHdr;
+        if (!tracks.length) continue;
+        tracks.sort((a, b) => {
+          const aCodecs = String((a && a.codecs) || "");
+          const bCodecs = String((b && b.codecs) || "");
+          const aHevc = (a && (a.codecid === 12 || /hev1|hvc1/i.test(aCodecs))) ? 1 : 0;
+          const bHevc = (b && (b.codecid === 12 || /hev1|hvc1/i.test(bCodecs))) ? 1 : 0;
+          if (bHevc !== aHevc) return bHevc - aHevc;
+          const aAvc = (a && (a.codecid === 7 || /avc1/i.test(aCodecs))) ? 1 : 0;
+          const bAvc = (b && (b.codecid === 7 || /avc1/i.test(bCodecs))) ? 1 : 0;
+          if (bAvc !== aAvc) return bAvc - aAvc;
+          return (Number(b.bandwidth) || 0) - (Number(a.bandwidth) || 0);
+        });
+        for (const t of tracks) {
+          for (const u of getAllUrls(t)) {
+            if (!out.includes(u)) out.push(u);
+          }
         }
       }
-      
-      // Create the huge buffer ONLY at the very end
-      // 如果合并切片失败，说明无法创建大的 Uint8Array
-      // 此时我们无法通过 FFmpeg 合并（因为 FFmpeg.FS 必须接受 Buffer），
-      // 但我们仍然可以尝试“分片写入”到本地文件，或者直接抛出特殊错误让上层降级
+      return out;
+    };
+
+    // Helper to format filename properly
+    const getSafeFilename = (name) => {
+        // Remove invalid characters for Windows/Linux/Mac
+        if (!name) return "bilibili_video";
+        return name.replace(/[\\/:*?\"<>|]/g, "_").trim();
+    };
+
+    // 3. Logic Start
+    overlay.setStep("正在解析视频信息...");
+    
+    // Add a race with timeout for the whole resolution process
+    const resolvePromise = resolveBilibili();
+    const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("解析超时，请刷新重试")), 10000)
+    );
+    
+    let dash = null;
+    try {
+        dash = await Promise.race([resolvePromise, timeoutPromise]);
+    } catch (e) {
+        overlay.setStep("解析出错");
+        overlay.setDetail(e.message);
+        overlay.done(); // Allow close
+        return;
+    }
+
+    if (!dash) {
+      overlay.setStep("未找到视频流信息");
+      overlay.setDetail("无法获取 DASH 格式地址，请确认视频是否有效或需要登录。");
+      overlay.done();
+      setTimeout(() => overlay.remove(), 6000);
+      return;
+    }
+
+    const vTrackArr = dash.video;
+    const aTrackArr = dash.audio;
+    const vUrl = pickBestVideoUrl(vTrackArr);
+    const aUrl = pickBest(aTrackArr);
+    const vTrack =
+      (vTrackArr || []).find((x) => (x.baseUrl || x.base_url || x.url) === vUrl) ||
+      (vTrackArr && vTrackArr[0]) ||
+      null;
+    const aTrack =
+      (aTrackArr || []).find((x) => (x.baseUrl || x.base_url || x.url) === aUrl) ||
+      (aTrackArr && aTrackArr[0]) ||
+      null;
+    // Use getSafeFilename here to ensure consistency
+    const rawTitle = document.title ? document.title.replace("_bilibili", "") : "bilibili_video";
+    let videoTitle = null;
+    try {
+      videoTitle = window.__INITIAL_STATE__?.videoData?.title || window.__INITIAL_STATE__?.h1Title || null;
+    } catch (_) {}
+    if (!videoTitle) {
+      const metaTitle = document.querySelector('meta[property="og:title"]');
+      if (metaTitle?.content) videoTitle = metaTitle.content;
+    }
+    if (!videoTitle) {
+      const h1 = document.querySelector("h1");
+      const t = h1 && (h1.getAttribute("title") || h1.textContent);
+      if (t) videoTitle = t;
+    }
+    if (!videoTitle) {
       try {
-          // 尝试检测是否能分配
-          // 如果不行，直接 throw
+        const info = await getBvid();
+        if (info?.bvid) {
+          const viewRes = await fetchWithTimeout(
+            `https://api.bilibili.com/x/web-interface/view?bvid=${info.bvid}`,
+            { credentials: "include" }
+          );
+          const viewJson = await viewRes.json();
+          const t = viewJson?.data?.title;
+          if (t) videoTitle = t;
+        }
+      } catch (_) {}
+    }
+    if (videoTitle) videoTitle = String(videoTitle).trim();
+    const filename = getSafeFilename(videoTitle || rawTitle);
+
+    if (!vUrl || !aUrl) {
+      overlay.setStep("解析失败");
+      if (!vUrl && vTrackArr && vTrackArr.length) {
+        overlay.setDetail("未找到可下载的 SDR(709) 视频轨道（已排除 HDR/杜比/受控轨道）");
+      } else {
+        overlay.setDetail("未找到有效的视频或音频轨道。");
+      }
+      overlay.done();
+      return;
+    }
+
+    // 4. Download Helpers
+    const triggerBgDownload = (payload) => {
+        // Update overlay to show we are handing off to browser
+        overlay.setStep("已调用浏览器下载");
+        overlay.setProgress(100);
+        overlay.setDetail("请查看浏览器右上角下载列表");
+        overlay.done();
+        
+        // Dispatch event to content_bridge.js (ISOLATED world)
+        // which has access to chrome.runtime
+        window.dispatchEvent(new CustomEvent("BILI_TRIGGER_DOWNLOAD", { 
+            detail: payload
+        }));
+    };
+
+    const streamToFile = async ({ urls, suggestedName, label, progressBase, progressScale }) => {
+      if (!window.showSaveFilePicker) throw new Error("当前浏览器不支持流式保存");
+      const handle = await window.showSaveFilePicker({ suggestedName });
+      const writable = await handle.createWritable();
+      try {
+        for (const url of urls || []) {
+          try {
+            const res = await fetch(url, { credentials: "include", signal });
+            if (!res.ok || !res.body) continue;
+            const total = Number(res.headers.get("content-length")) || 0;
+            const reader = res.body.getReader();
+            let loaded = 0;
+            const start = performance.now();
+            overlay.setStep(`正在保存${label}...`);
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              await writable.write(value);
+              loaded += value.length;
+              if (total) {
+                const p = (loaded / total) * 100;
+                overlay.setProgress(progressBase + p * progressScale);
+                const elapsed = (performance.now() - start) / 1000;
+                const speed = loaded / Math.max(0.1, elapsed);
+                overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
+              } else {
+                overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
+              }
+            }
+            await writable.close();
+            return true;
+          } catch (_) {}
+        }
+        await writable.abort();
+        throw new Error(`${label}下载失败`);
+      } catch (e) {
+        try { await writable.abort(); } catch (_) {}
+        throw e;
+      }
+    };
+
+    const startSplitStreamingSave = async () => {
+      const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
+      const safeName = getSafeFilename(baseTitle.slice(0, 5));
+      overlay.setProgress(0);
+      await streamToFile({
+        urls: getVideoUrlCandidates(vTrackArr),
+        suggestedName: "视频-" + safeName + ".mp4",
+        label: "视频",
+        progressBase: 0,
+        progressScale: 0.5
+      });
+      await streamToFile({
+        urls: getAllUrls(aTrack),
+        suggestedName: "音频-" + safeName + ".mp3",
+        label: "音频",
+        progressBase: 50,
+        progressScale: 0.5
+      });
+      overlay.setStep("下载完成");
+      overlay.setProgress(100);
+      overlay.done();
+      setTimeout(() => overlay.remove(), 5000);
+    };
+
+    window.addEventListener("BILI_DOWNLOAD_ERROR", (e) => {
+      const msg = e?.detail?.message || "下载失败";
+      overlay.setStep("下载失败");
+      overlay.setDetail(msg);
+      if (String(msg).includes("SERVER_FORBIDDEN") && window.showSaveFilePicker) {
+        overlay.addBtn("流式保存", async () => {
+          try {
+            await startSplitStreamingSave();
+          } catch (err) {
+            overlay.setStep("下载失败");
+            overlay.setDetail(err && err.message ? err.message : "下载失败");
+            overlay.done();
+          }
+        });
+      }
+      overlay.done();
+    });
+
+    // MOVED UP: getSafeFilename was here, now moved before usage in logic flow
+
+    const loadFFmpeg = async () => {
+       overlay.setStep("正在加载核心组件...");
+       
+       const loadScript = (url) => new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = url;
+          s.onload = res;
+          s.onerror = rej;
+          document.head.appendChild(s);
+       });
+
+       // Try injected URLs first
+       if (window.__FFMPEG_URL__) {
+           try {
+               await loadScript(window.__FFMPEG_URL__);
+           } catch(e) { console.warn("Local FFmpeg load failed", e); }
+       }
+       
+       if (!window.FFmpeg) {
+           // Fallback CDN
+           await loadScript("https://unpkg.com/@ffmpeg/ffmpeg@0.11.2/dist/ffmpeg.min.js");
+       }
+       
+       const createFFmpeg = window.FFmpeg.createFFmpeg;
+       
+       // Helper to load FFmpeg
+       const tryLoad = async (corePath, mainName) => {
+           const f = createFFmpeg({
+               corePath: corePath,
+               log: false,
+               mainName: mainName
+           });
+           await f.load();
+           return f;
+       };
+
+       let ffmpeg;
+       
+       // Strategy 1: Local Multi-Threaded (Default)
+       // Requires SharedArrayBuffer (COOP/COEP headers)
+       try {
+           if (window.SharedArrayBuffer && window.__FFMPEG_CORE_URL__) {
+               ffmpeg = await tryLoad(window.__FFMPEG_CORE_URL__);
+           } else {
+               throw new Error("SharedArrayBuffer missing or local core not found");
+           }
+       } catch (e1) {
+           console.warn("MT FFmpeg failed, trying Local ST...", e1);
+           
+           // Strategy 2: Local Single-Threaded
+           try {
+               if (window.__FFMPEG_CORE_ST_URL__) {
+                   ffmpeg = await tryLoad(window.__FFMPEG_CORE_ST_URL__, 'main');
+               } else {
+                   throw new Error("Local ST core not found");
+               }
+           } catch (e2) {
+               console.warn("Local ST FFmpeg failed, trying CDN ST...", e2);
+               
+               // Strategy 3: CDN Single-Threaded (Last Resort)
+               ffmpeg = await tryLoad("https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js", 'main');
+           }
+       }
+       
+       return ffmpeg;
+    };
+
+    const fetchToFFmpeg = async (u, label) => {
+      const r = await fetch(u, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin", signal });
+      if (!r.ok) throw new Error(`${label}下载失败: ${r.status}`);
+      
+      const total = Number(r.headers.get("content-length")) || 0;
+      const MAX_SIZE = 1.8 * 1024 * 1024 * 1024; // 1.8GB
+      
+      if (total > MAX_SIZE) {
+          const e = new Error("File too large");
+          e.name = "BigFileError";
+          e.total = total;
+          throw e;
+      }
+
+      const reader = r.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      const start = performance.now();
+      
+      overlay.setStep(`正在下载${label}...`);
+      
+      while(true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          loaded += value.length;
+          
+          if (total) {
+              const p = (loaded / total) * 100;
+              // Only update UI every 1% or so to save performance? No, let's just do it.
+              overlay.setProgress(p * 0.5); // 50% for download phase? 
+              // Wait, this function is called twice. 
+              // We should handle progress better. But let's keep it simple.
+              
+              const elapsed = (performance.now() - start) / 1000;
+              const speed = loaded / elapsed;
+              // const eta = (total - loaded) / speed; // Unused
+              
+              // Only update Detail, NOT progress bar (let main loop handle overall progress?)
+              // No, let's update progress bar relative to download phase (0-90%)
+              // But we have 2 files. Let's make it simpler:
+              // Video is usually 80-90% of size. Audio is small.
+              // Just show text detail in overlay.
+              
+              overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
+          } else {
+              overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
+          }
+      }
+      
+      // Merge chunks to Uint8Array
+      try {
           const out = new Uint8Array(loaded);
           let offset = 0;
           for (const c of chunks) { out.set(c, offset); offset += c.length; }
           return out;
-      } catch(e) {
-          // 特殊标记错误对象，携带数据以便救援
-          const err = new Error("内存不足(合并切片失败): " + e.message);
-          err.chunks = chunks; // 把数据挂在 error 上，万一我们能救？
-          err.label = label; // 记录是视频还是音频
-          // 其实这里如果 new Uint8Array 失败，说明内存真的不够了。
-          // 我们无法给 FFmpeg 喂数据。
-          // 唯一能做的是：直接把 chunks 存成文件（不合并）。
-          // 或者，我们可以尝试流式写入 FFmpeg？
-          // 不，FFmpeg.FS 在 v0.11 里是基于 MEMFS，也是内存。
-          // 所以如果 JS 侧都爆了，Wasm 侧肯定也爆。
+      } catch (e) {
+          const err = new Error("Memory allocation failed");
+          err.name = "OOMError";
+          err.chunks = chunks;
           throw err;
       }
-    }
+    };
 
-    // 尝试使用 File System Access API 保存
-    async function saveFile(filename, buffer) {
-       try {
-         // @ts-ignore
-         if (window.showSaveFilePicker) {
-            const handle = await window.showSaveFilePicker({
-              suggestedName: filename,
-              types: [{
-                description: 'MP4 Video',
-                accept: {'video/mp4': ['.mp4']},
-              }],
-            });
-            const writable = await handle.createWritable();
-            await writable.write(buffer);
-            await writable.close();
-            return true;
-         }
-       } catch(e) {
-         console.warn("File System API failed, falling back to download", e);
-       }
-       return false;
-    }
-
-    let vBin, aBin;
-     try {
-       // Parallel download? No, sequential to save memory peak? 
-       // Parallel is faster but uses double memory at peak. 
-       // Let's do sequential for safety if we are worried about memory.
-       // User asked for solution to "Memory Insufficient". Sequential is safer.
-       
-       // Load FFmpeg first?
-       // Actually, let's keep downloading first, but use the chunk list approach (fetchToFFmpeg).
-       // If we load FFmpeg first, we hold FFmpeg memory + Download memory. Bad idea.
-       // Better: Download -> Load FFmpeg -> Write -> Merge -> Free -> Save.
-       
-       try {
-          vBin = await fetchToFFmpeg(vUrl, "视频");
-          aBin = await fetchToFFmpeg(aUrl, "音频");
-        } catch (eMem) {
-          if (eMem.message.includes("内存不足") && eMem.chunks) {
-             const isVideo = eMem.label === "视频";
-             const trackName = isVideo ? "_video.m4s" : "_audio.m4s";
-             
-             let msg = "内存不足，无法在浏览器内完成合并。\n\n是否保存已下载的原始轨道数据？";
-             if (!isVideo && vBin) {
-                 msg += "\n(检测到视频已下载成功，将一并保存)";
-             }
-             
-             if (confirm(msg)) {
-                 // 1. 保存导致报错的那个轨道（chunks）
-                 const blob = new Blob(eMem.chunks, { type: "video/mp4" });
-                 const a = document.createElement("a");
-                 a.href = URL.createObjectURL(blob);
-                 
-                 // 明确文件名为 [视频] 和 [音频] 前缀，方便小白区分
-                 // 例如: [视频]神偷奶爸...m4s
-                 const prefix = isVideo ? "[视频]" : "[音频]";
-                 a.download = prefix + filename + ".m4s";
-                 
-                 document.body.appendChild(a);
-                 a.click();
-                 a.remove();
-                 
-                 // 2. 如果是音频报错，且视频之前已经下载好了，把视频也存下来
-                 if (!isVideo && vBin) {
-                     setTimeout(() => {
-                         const blobV = new Blob([vBin], { type: "video/mp4" });
-                         const aV = document.createElement("a");
-                         aV.href = URL.createObjectURL(blobV);
-                         aV.download = "[视频]" + filename + ".m4s";
-                         document.body.appendChild(aV);
-                         aV.click();
-                         aV.remove();
-                     }, 1000);
-                 }
-                 
-                 // 3. 如果是视频报错，说明音频还没下。
-                  // 此时是否尝试下载音频？
-                  if (isVideo && aUrl) {
-                      // 用户交互优化：明确询问是否需要下载音频
-                      if (confirm("视频轨道已由于内存不足自动保存。\n\n是否需要继续下载音频轨道？\n(点击“确定”下载音频，点击“取消”结束)")) {
-                          // 使用 fetch 下载以确保文件名正确（直接使用 href 会导致跨域文件名失效）
-                          fetch(aUrl, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin" })
-                            .then(res => res.blob())
-                            .then(blob => {
-                                const aAudio = document.createElement("a");
-                                aAudio.href = URL.createObjectURL(blob);
-                                aAudio.download = "[音频]" + filename + ".m4s";
-                                document.body.appendChild(aAudio);
-                                aAudio.click();
-                                aAudio.remove();
-                            })
-                            .catch(() => {
-                                // 如果 fetch 失败（极少情况），回退到直接下载链接（文件名可能会乱，但至少能下）
-                                const aAudio = document.createElement("a");
-                                aAudio.href = aUrl;
-                                aAudio.download = "[音频]" + filename + ".m4s";
-                                document.body.appendChild(aAudio);
-                                aAudio.click();
-                                aAudio.remove();
-                            });
-                      }
-                  }
-
-                 window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: { step: "已保存原始轨道", progress: 100, detail: "内存不足以合并，已保存原始数据", done: true } }));
-                  // 强制关闭悬浮窗
-                  overlay.setStep("已保存原始轨道");
-                  overlay.done();
-                  setTimeout(() => overlay.remove(), 2000);
-                  return;
-              }
-          }
-          throw eMem;
+    // 5. Execution Flow
+    try {
+        let vBin = null, aBin = null;
+        
+        // Video
+        try {
+            vBin = await fetchToFFmpeg(vUrl, "视频");
+        } catch (e) {
+            if (e.name === "BigFileError" || e.name === "OOMError") {
+                throw e; // Bubble up to main catch
+            }
+            throw e;
         }
-     } catch (eFetch) {
-       // ... error handling ...
-       throw eFetch;
+
+        // Audio
+        try {
+            aBin = await fetchToFFmpeg(aUrl, "音频");
+        } catch (e) {
+             if (e.name === "BigFileError" || e.name === "OOMError") {
+                // If video was already downloaded in memory, we might crash here.
+                // But we can try to save video at least.
+                e.vBin = vBin;
+                throw e;
+            }
+            throw e;
+        }
+
+        // Merge
+        overlay.setStep("正在合并...");
+        overlay.setProgress(90);
+        
+        const ffmpeg = await loadFFmpeg();
+        ffmpeg.FS("writeFile", "v.m4s", vBin);
+        const vLen = vBin.length; // Keep length for stats if needed
+        vBin = null; // GC
+        ffmpeg.FS("writeFile", "a.m4s", aBin);
+        const aLen = aBin.length;
+        aBin = null; // GC
+        
+        await ffmpeg.run("-i", "v.m4s", "-i", "a.m4s", "-c", "copy", "out.mp4");
+        
+        const out = ffmpeg.FS("readFile", "out.mp4");
+        ffmpeg.FS("unlink", "out.mp4");
+        ffmpeg.FS("unlink", "v.m4s");
+        ffmpeg.FS("unlink", "a.m4s");
+
+        // Save
+        overlay.setStep("保存文件中...");
+        try {
+            // @ts-ignore
+            if (window.showSaveFilePicker) {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: filename + ".mp4",
+                    types: [{ description: 'MP4 Video', accept: {'video/mp4': ['.mp4']} }],
+                });
+                const w = await handle.createWritable();
+                await w.write(out);
+                await w.close();
+            } else {
+                throw new Error("Use fallback");
+            }
+        } catch (_) {
+            const blob = new Blob([out.buffer], { type: "video/mp4" });
+            const u = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = u;
+            a.download = filename + ".mp4";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }
+        
+        overlay.setStep("下载完成");
+        overlay.setProgress(100);
+        overlay.done();
+        setTimeout(() => overlay.remove(), 5000);
+
+    } catch (e) {
+        console.error("Download Error", e);
+        
+        // Handle Big File / OOM
+        if (e.name === "BigFileError" || e.name === "OOMError" || e.message.includes("File too large")) {
+            overlay.setStep("文件过大");
+            overlay.setDetail("无法在浏览器内存中合并 >1.8GB 文件");
+            
+            // Allow UI update
+            await new Promise(r => setTimeout(r, 100));
+            
+            if (confirm(`检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？`)) {
+                const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
+                const safeName = getSafeFilename(baseTitle.slice(0, 5));
+                triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: "视频-" + safeName + ".mp4" });
+                setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".mp3" }), 1000);
+                if (window.showSaveFilePicker) {
+                  overlay.addBtn("流式保存", async () => {
+                    try {
+                      await startSplitStreamingSave();
+                    } catch (err) {
+                      overlay.setStep("下载失败");
+                      overlay.setDetail(err && err.message ? err.message : "下载失败");
+                      overlay.done();
+                    }
+                  });
+                }
+            }
+            
+            overlay.done();
+            return;
+        }
+
+        if (e.name === "AbortError") {
+            overlay.setStep("已取消");
+            setTimeout(() => overlay.remove(), 2000);
+            return;
+        }
+
+        // Critical Fallback: Save separate files if download succeeded but merge failed
+        // Note: vBin/aBin are local to the try block above, but we can't easily access them here
+        // unless we lift them up. However, due to scope, we need to redefine them outside.
+        // Wait, I cannot redefine 'vBin' here because it's inside the 'try' block in the original code.
+        // I need to change the structure in the 'SearchReplace'.
+        
+        overlay.setStep("出错啦");
+        overlay.setDetail(e.message);
+        
+        // Check if it is a fetch error during merge (e.g. ffmpeg load)
+        if (confirm("合并失败: " + e.message + "\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)")) {
+             const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
+             const safeName = getSafeFilename(baseTitle.slice(0, 5));
+             if (vUrl) triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: "视频-" + safeName + ".mp4" });
+             if (aUrl) setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".mp3" }), 1000);
+        }
     }
- 
-     // ... FFmpeg loading ...
-     if (!ffmpeg) {
-         ffmpeg = await loadFFmpeg();
-     }
-     
-     // 写入与合并
-     overlay.setStep("正在合并音视频...");
-     const tMergeStart = performance.now();
-     await ffmpeg.FS("writeFile", "v.m4s", vBin);
-     vBin = null; // Free memory immediately
-     await ffmpeg.FS("writeFile", "a.m4s", aBin);
-     aBin = null; // Free memory immediately
 
-     const mergeTimer = setInterval(() => {
-       const elapsed = (performance.now() - tMergeStart) / 1000;
-       overlay.setDetail("正在合并... 已用时 " + fmtTime(elapsed));
-       setStatus({ step: "正在合并音视频", progress: 75, detail: "已用时 " + fmtTime(elapsed) });
-     }, 1000);
-     await ffmpeg.run("-i", "v.m4s", "-i", "a.m4s", "-c", "copy", "out.mp4");
-     clearInterval(mergeTimer);
-     const tMerge = (performance.now() - tMergeStart) / 1000;
-     overlay.setProgress(95);
-     await setStatus({ step: "合并完成，正在保存", progress: 95, detail: `合并耗时 ${fmtTime(tMerge)}` });
- 
-     // 读取与保存
-     overlay.setStep("正在保存文件...");
-     const out = await ffmpeg.FS("readFile", "out.mp4");
-     await ffmpeg.FS("unlink", "out.mp4"); // Free MEMFS
-     await ffmpeg.FS("unlink", "v.m4s");
-     await ffmpeg.FS("unlink", "a.m4s");
-
-     // Try File System Access API first
-     const saved = await saveFile(filename + ".mp4", out);
-     
-     if (!saved) {
-        const blob = new Blob([out.buffer], { type: "video/mp4" });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = filename + ".mp4";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-     }
-
-     overlay.setProgress(100);
-     overlay.setStep("下载完成");
-     overlay.setDetail(`合并耗时 ${fmtTime(tMerge)}，总大小 ${fmtBytes(out.byteLength)}`);
-     overlay.done();
-     await setStatus({ step: "下载完成", progress: 100, detail: `文件 ${filename}.mp4 已保存到${saved ? '所选位置' : '浏览器默认下载目录'}` , filename: filename + ".mp4", done: true });
-     setTimeout(() => overlay.remove(), 5000);
-
-   } catch (e) {
-    if (e.name === 'AbortError') {
-      console.log("Download aborted by user");
-      return;
-      // 3. Last fallback: Separate download
-      if (confirm("下载失败: " + e.message + "\n\n是否尝试分别下载视频和音频轨道？\n(需要您手动合并或使用播放器加载)")) {
-         if (vUrl) {
-           const a1 = document.createElement("a");
-           a1.href = vUrl;
-           a1.download = filename + "_video.m4s";
-           document.body.appendChild(a1);
-           a1.click();
-           a1.remove();
-         }
-         if (aUrl) {
-           setTimeout(() => {
-             const a2 = document.createElement("a");
-             a2.href = aUrl;
-             a2.download = filename + "_audio.m4s";
-             document.body.appendChild(a2);
-             a2.click();
-             a2.remove();
-           }, 1000);
-         }
-         window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: { step: "已触发分别下载", progress: 100, detail: "请查收 _video.m4s 和 _audio.m4s 文件", done: true } }));
-         return;
-      }
+  } catch (err) {
+    // Show error in overlay
+    const overlay = document.getElementById("bili-download-overlay");
+    if (overlay) {
+        // Simple manual update if overlay object is lost in scope (it shouldn't be)
+        // But we are in the main IIFE catch, overlay variable is not accessible here if defined inside.
+        // Wait, 'overlay' is defined inside the IIFE, so it is accessible in this catch block?
+        // NO. 'overlay' is defined inside the 'try' block of the IIFE.
+        // So we cannot access 'overlay' variable here.
+        // We must rely on DOM.
+        const step = overlay.querySelector("div:nth-child(2)"); // Step div
+        const detail = overlay.querySelector("div:nth-child(4)"); // Detail div
+        if (step) step.textContent = "出错啦";
+        if (detail) detail.textContent = err.message;
+        
+        // Add a close button if not present or stuck
+        // ...
+    } else {
+        alert("脚本启动失败: " + err.message);
     }
-    alert("下载失败: " + e.message);
-    window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: { step: "下载失败", progress: 0, detail: e.message, error: true, ts: Date.now() } }));
+    console.error(err);
   }
 })();
