@@ -575,7 +575,7 @@
       });
       await streamToFile({
         urls: getAllUrls(aTrack),
-        suggestedName: "音频-" + safeName + ".mp3",
+        suggestedName: "音频-" + safeName + ".m4a",
         label: "音频",
         progressBase: 50,
         progressScale: 0.5
@@ -829,7 +829,7 @@
                 const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
                 const safeName = getSafeFilename(baseTitle.slice(0, 5));
                 triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: "视频-" + safeName + ".mp4" });
-                setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".mp3" }), 1000);
+                setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".m4a" }), 1000);
                 if (window.showSaveFilePicker) {
                   overlay.addBtn("流式保存", async () => {
                     try {
@@ -867,7 +867,7 @@
              const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
              const safeName = getSafeFilename(baseTitle.slice(0, 5));
              if (vUrl) triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: "视频-" + safeName + ".mp4" });
-             if (aUrl) setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".mp3" }), 1000);
+             if (aUrl) setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".m4a" }), 1000);
         }
     }
 
