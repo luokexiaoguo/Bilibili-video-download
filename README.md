@@ -3,6 +3,8 @@
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-blue)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
+**中文** | [English](README_EN.md)
+
 **B站离线舱-番剧电影下载器** 是一款基于 Microsoft Edge / Google Chrome 的浏览器扩展，专注于提供 Bilibili 视频、番剧、电影的高清下载体验。它利用 WebAssembly 版本的 FFmpeg 在本地进行音视频合并，确保隐私安全，无需将数据上传至第三方服务器。
 
 ## ✨ 功能特性
