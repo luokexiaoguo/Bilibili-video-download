@@ -5,7 +5,10 @@
 <title>B站离线舱</title>
 <style>
 body{font-family:system-ui,Segoe UI,Arial;padding:12px;width:280px;background:#1f1f1f;color:#e0e0e0}
-h3{color:#FB7299;margin:5px 0 15px;text-align:center;font-size:18px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}
+h3{color:#FB7299;margin:0;font-size:18px;flex:1;text-align:center}
+.lang-btn{background:transparent;border:1px solid #444;color:#aaa;padding:2px 6px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:8px;box-shadow:none;width:auto}
+.lang-btn:hover{background:#333;color:#fff}
 button{width:100%;padding:12px;border:0;border-radius:8px;background:#FB7299;color:#fff;font-weight:600;font-size:14px;cursor:pointer;transition:background 0.2s;box-shadow:0 2px 6px rgba(251,114,153,0.2)}
 button:hover{background:#ff85a8}
 button:active{transform:scale(0.98)}
@@ -21,20 +24,23 @@ button:active{transform:scale(0.98)}
 </style>
 </head>
 <body>
-<h3>B站离线舱-番剧电影下载器</h3>
+<div class="header">
+  <h3 data-i18n="popupTitle">B站离线舱-番剧电影下载器</h3>
+  <button id="langToggle" class="lang-btn">EN</button>
+</div>
 <div class="tips">
-  <p>💡 使用小贴士</p>
+  <p data-i18n="tipsTitle">💡 使用小贴士</p>
   <ul>
-    <li><b>自动合并</b>：首选方案，适合大多数视频，自动合成 MP4。</li>
-    <li><b>自动分流</b>：当合并失败时，插件会自动尝试分别下载音视频（由浏览器接管）。</li>
-    <li><b>流式保存</b>：最后的兜底方案。如果以上都失败，请用此功能手动保存。</li>
+    <li data-i18n="tipMerge"><b>自动合并</b>：首选方案，适合大多数视频，自动合成 MP4。</li>
+    <li data-i18n="tipSplit"><b>自动分流</b>：当合并失败时，插件会自动尝试分别下载音视频（由浏览器接管）。</li>
+    <li data-i18n="tipStream"><b>流式保存</b>：最后的兜底方案。如果以上都失败，请用此功能手动保存。</li>
   </ul>
 </div>
-<button id="send">一键下载 4K 视频</button>
+<button id="send" data-i18n="btnDownload">一键下载（最高支持8K）</button>
 <div id="msg"></div>
 <div class="footer">
-  <div style="margin-bottom:4px">反馈邮箱：<a href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a></div>
-  <div>感觉不错可以支持个鸡腿：<a href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer">支持</a></div>
+  <div style="margin-bottom:4px"><span data-i18n="footerEmail">反馈邮箱：</span><a href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a></div>
+  <div><span data-i18n="footerSupport">感觉不错可以支持个鸡腿：</span><a href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer" data-i18n="linkSupport">支持</a></div>
 </div>
 <script src="popup.js"></script>
 </body>

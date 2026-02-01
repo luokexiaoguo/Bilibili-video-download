@@ -2,6 +2,82 @@
   try {
     console.log("[BilibiliDownloader] Script started");
 
+    const lang = window.__BILI_LANG__ || "zh";
+    const T = {
+      zh: {
+        title: "B站离线舱",
+        init: "初始化中...",
+        cancel: "取消",
+        close: "关闭",
+        confirmCancel: "确定要取消下载吗？",
+        parse: "正在解析视频信息...",
+        parseErr: "解析出错",
+        noInfo: "未找到视频流信息",
+        noInfoDetail: "无法获取 DASH 格式地址，请确认视频是否有效或需要登录。",
+        noTrack: "解析失败",
+        noTrackDetail: "未找到有效的视频或音频轨道。",
+        browserDl: "已调用浏览器下载",
+        browserDlDetail: "请查看浏览器右上角下载列表",
+        saving: "正在保存",
+        dlFail: "下载失败",
+        exportAudio: "正在导出音频...",
+        dlDone: "下载完成",
+        dlFailTitle: "下载失败",
+        streamSave: "流式保存",
+        coreLoad: "正在加载核心组件...",
+        dlStep: "正在下载",
+        merge: "正在合并...",
+        saveFile: "保存文件中...",
+        canceled: "已取消",
+        bigFile: "文件过大",
+        bigFileDetail: "无法在浏览器内存中合并 >1.8GB 文件",
+        bigFileConfirm: "检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？",
+        errTitle: "出错啦",
+        mergeFailConfirm: "合并失败: {msg}\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)",
+        video: "视频",
+        audio: "音频",
+        noStreamSave: "当前浏览器不支持流式保存",
+        selectAudio: "请继续选择音频保存位置...",
+        scriptFail: "脚本启动失败: "
+      },
+      en: {
+        title: "BiliDown",
+        init: "Initializing...",
+        cancel: "Cancel",
+        close: "Close",
+        confirmCancel: "Confirm cancel download?",
+        parse: "Parsing video info...",
+        parseErr: "Parse Error",
+        noInfo: "Video info not found",
+        noInfoDetail: "Cannot fetch DASH url. Please check video validity or login.",
+        noTrack: "Parse Failed",
+        noTrackDetail: "No valid video or audio track found.",
+        browserDl: "Browser download started",
+        browserDlDetail: "Check browser download list.",
+        saving: "Saving ",
+        dlFail: "Download Failed",
+        exportAudio: "Exporting Audio...",
+        dlDone: "Download Complete",
+        dlFailTitle: "Download Failed",
+        streamSave: "Stream Save",
+        coreLoad: "Loading Core...",
+        dlStep: "Downloading ",
+        merge: "Merging...",
+        saveFile: "Saving file...",
+        canceled: "Canceled",
+        bigFile: "File Too Large",
+        bigFileDetail: "Cannot merge >1.8GB file in browser memory",
+        bigFileConfirm: "File too large (or OOM). Cannot merge.\n\nDownload video/audio separately?",
+        errTitle: "Error",
+        mergeFailConfirm: "Merge failed: {msg}\n\nDownload fetched video/audio tracks separately?\n(Data will be lost if not saved)",
+        video: "Video",
+        audio: "Audio",
+        noStreamSave: "Browser does not support stream save",
+        selectAudio: "Select location for AUDIO file...",
+        scriptFail: "Script failed to start: "
+      }
+    }[lang];
+
     // 1. Overlay UI Component
     const overlay = (() => {
       try {
@@ -55,11 +131,14 @@
         titleDiv.style.marginBottom = "8px";
         titleDiv.style.borderBottom = "1px solid rgba(255,255,255,0.2)";
         titleDiv.style.paddingBottom = "4px";
-        titleDiv.textContent = "B站离线舱";
+        
+        // I18N Handling (Moved to top scope)
+
+        titleDiv.textContent = T.title;
         el.appendChild(titleDiv);
 
         const stepDiv = document.createElement("div");
-        stepDiv.textContent = "初始化中...";
+        stepDiv.textContent = T.init;
         el.appendChild(stepDiv);
 
         const barContainer = document.createElement("div");
@@ -107,8 +186,8 @@
             return btn;
         };
 
-        const cancelBtn = createBtn("取消", "#ff6b6b", () => {
-            if (confirm("确定要取消下载吗？")) {
+        const cancelBtn = createBtn(T.cancel, "#ff6b6b", () => {
+            if (confirm(T.confirmCancel)) {
                 controller.abort();
                 el.remove();
             }
@@ -145,7 +224,7 @@
              return btn;
           },
           done: () => {
-             cancelBtn.textContent = "关闭";
+             cancelBtn.textContent = T.close;
              cancelBtn.style.color = "#fff";
              cancelBtn.style.textDecoration = "none";
              // Remove onclick event to prevent accidental download cancellation when closing the completed dialog
@@ -154,11 +233,11 @@
           },
           // Expose resetCancelBtn to restore the cancel button state
           resetCancelBtn: () => {
-             cancelBtn.textContent = "取消";
+             cancelBtn.textContent = T.cancel;
              cancelBtn.style.color = "#ff6b6b";
              cancelBtn.style.textDecoration = "underline";
              cancelBtn.onclick = () => {
-                if (confirm("确定要取消下载吗？")) {
+                if (confirm(T.confirmCancel)) {
                     controller.abort();
                     el.remove();
                 }
@@ -170,7 +249,7 @@
           }
         };
       } catch (e) {
-        alert("UI初始化失败: " + e.message);
+        alert("UI Init Failed / UI初始化失败: " + e.message);
         throw e;
       }
     })();
@@ -218,7 +297,7 @@
     const fmtTime = (s) => {
       s = Math.max(0, Math.floor(s));
       const m = Math.floor(s / 60); const ss = s % 60;
-      return (m > 0 ? m + "分" : "") + ss + "秒";
+      return (m > 0 ? m + "m " : "") + ss + "s";
     };
 
     // 2. Bilibili Resolver
@@ -489,27 +568,27 @@
     };
 
     // 3. Logic Start
-    overlay.setStep("正在解析视频信息...");
+    overlay.setStep(T.parse);
     
     // Add a race with timeout for the whole resolution process
     const resolvePromise = resolveBilibili();
     const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("解析超时，请刷新重试")), 10000)
+        setTimeout(() => reject(new Error("Timeout")), 10000)
     );
     
     let dash = null;
     try {
         dash = await Promise.race([resolvePromise, timeoutPromise]);
     } catch (e) {
-        overlay.setStep("解析出错");
+        overlay.setStep(T.parseErr);
         overlay.setDetail(e.message);
         overlay.done(); // Allow close
         return;
     }
 
     if (!dash) {
-      overlay.setStep("未找到视频流信息");
-      overlay.setDetail("无法获取 DASH 格式地址，请确认视频是否有效或需要登录。");
+      overlay.setStep(T.noInfo);
+      overlay.setDetail(T.noInfoDetail);
       overlay.done();
       setTimeout(() => overlay.remove(), 6000);
       return;
@@ -559,11 +638,11 @@
     const aAllUrls = Array.isArray(aPick.urls) && aPick.urls.length ? aPick.urls : getAllUrls(aTrack);
 
     if (!vUrl || !aUrl) {
-      overlay.setStep("解析失败");
+      overlay.setStep(T.noTrack);
       if (!vUrl && vTrackArr && vTrackArr.length) {
-        overlay.setDetail("未找到可下载的 SDR(709) 视频轨道（已排除 HDR/杜比/受控轨道）");
+        overlay.setDetail(T.noTrackDetail + " (HDR/Dolby excluded)");
       } else {
-        overlay.setDetail("未找到有效的视频或音频轨道。");
+        overlay.setDetail(T.noTrackDetail);
       }
       overlay.done();
       return;
@@ -572,9 +651,9 @@
     // 4. Download Helpers
     const triggerBgDownload = (payload) => {
         // Update overlay to show we are handing off to browser
-        overlay.setStep("已调用浏览器下载");
+        overlay.setStep(T.browserDl);
         overlay.setProgress(100);
-        overlay.setDetail("请查看浏览器右上角下载列表");
+        overlay.setDetail(T.browserDlDetail);
         overlay.done();
         
         // Dispatch event to content_bridge.js (ISOLATED world)
@@ -585,7 +664,7 @@
     };
 
     const streamToFile = async ({ urls, suggestedName, label, progressBase, progressScale, handle: providedHandle }) => {
-      if (!window.showSaveFilePicker) throw new Error("当前浏览器不支持流式保存");
+      if (!window.showSaveFilePicker) throw new Error(T.noStreamSave);
       
       let handle = providedHandle;
       if (!handle) {
@@ -620,7 +699,7 @@
           const reader = res.body.getReader();
           let loaded = 0;
           const start = performance.now();
-          overlay.setStep(`正在保存${label}...`);
+          overlay.setStep(`${T.saving}${label}...`);
           while (true) {
             // Check abort signal
             if (signal.aborted) throw new Error("Aborted");
@@ -668,7 +747,7 @@
         }
       }
 
-      throw new Error(`${label}下载失败`);
+      throw new Error(`${label} ${T.dlFail}`);
     };
 
     const takeFirstChars = (s, n) => Array.from(String(s || "")).slice(0, n).join("");
@@ -686,29 +765,29 @@
           lastErr = e;
         }
       }
-      if (!bin) throw lastErr || new Error("音频下载失败");
+      if (!bin) throw lastErr || new Error(T.dlFail);
 
-      overlay.setStep("正在导出音频...");
+      overlay.setStep(T.exportAudio);
       const ff = await loadFFmpeg();
       ff.FS("writeFile", "a.m4s", bin);
       let outName = null;
       let outData = null;
       try {
-        await ff.run("-i", "a.m4s", "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "out.mp3");
-        outData = ff.FS("readFile", "out.mp3");
-        ff.FS("unlink", "out.mp3");
-        outName = "音频-" + safeName + ".mp3";
-      } catch (e1) {
+          await ff.run("-i", "a.m4s", "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "out.mp3");
+          outData = ff.FS("readFile", "out.mp3");
+          ff.FS("unlink", "out.mp3");
+          outName = `${T.audio}-${safeName}.mp3`;
+        } catch (e1) {
         try {
           await ff.run("-i", "a.m4s", "-vn", "-c:a", "mp3", "-b:a", "192k", "out.mp3");
           outData = ff.FS("readFile", "out.mp3");
           ff.FS("unlink", "out.mp3");
-          outName = "音频-" + safeName + ".mp3";
+          outName = `${T.audio}-${safeName}.mp3`;
         } catch (_) {
           await ff.run("-i", "a.m4s", "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "out.wav");
           outData = ff.FS("readFile", "out.wav");
           ff.FS("unlink", "out.wav");
-          outName = "音频-" + safeName + ".wav";
+          outName = `${T.audio}-${safeName}.wav`;
         }
       } finally {
         try { ff.FS("unlink", "a.m4s"); } catch (_) {}
@@ -755,20 +834,20 @@
       let vHandle, aHandle;
       try {
           vHandle = await window.showSaveFilePicker({ 
-              suggestedName: "视频-" + safeName + ".mp4",
+              suggestedName: `${T.video}-${safeName}.mp4`,
               types: [{ description: 'MP4 Video', accept: {'video/mp4': ['.mp4']} }]
           });
           
           // 提示用户下一步
-          overlay.setDetail("请继续选择音频保存位置...");
+          overlay.setDetail(T.selectAudio);
           
           aHandle = await window.showSaveFilePicker({ 
-              suggestedName: "音频-" + safeName + ".mp3",
-              types: [{ description: 'Audio', accept: {'audio/mpeg': ['.mp3'], 'audio/wav': ['.wav']} }] 
+              suggestedName: `${T.audio}-${safeName}.m4a`,
+              types: [{ description: 'M4A Audio', accept: {'audio/mp4': ['.m4a']} }] 
           });
       } catch (e) {
           if (e.name === 'AbortError') {
-              overlay.setDetail("已取消保存");
+              overlay.setDetail(T.canceled);
               setTimeout(() => overlay.remove(), 2000);
               return;
           }
@@ -785,7 +864,7 @@
       
       const videoPromise = streamToFile({
         urls: getVideoUrlCandidates(vTrackArr),
-        label: "视频",
+        label: T.video,
         progressBase: 0,
         progressScale: 0.8, // Video takes 80% weight
         handle: vHandle
@@ -800,7 +879,7 @@
          // Use the existing streamToFile logic but for audio
          await streamToFile({
             urls: list,
-            label: "音频",
+            label: T.audio,
             progressBase: 80, // Audio starts updating after 80%? No, parallel.
             // Actually, overlay progress might jump around if both update same bar.
             // But let's just reuse streamToFile for now.
@@ -813,23 +892,23 @@
       
       await Promise.all([videoPromise, audioPromise]);
 
-      overlay.setStep("下载完成");
+      overlay.setStep(T.dlDone);
       overlay.setProgress(100);
       overlay.done();
       setTimeout(() => overlay.remove(), 5000);
     };
 
     window.addEventListener("BILI_DOWNLOAD_ERROR", (e) => {
-      const msg = e?.detail?.message || "下载失败";
-      overlay.setStep("下载失败");
+      const msg = e?.detail?.message || T.dlFail;
+      overlay.setStep(T.dlFailTitle);
       overlay.setDetail(msg);
       if (window.showSaveFilePicker) {
-        overlay.addBtn("流式保存", async () => {
+        overlay.addBtn(T.streamSave, async () => {
           try {
             await startSplitStreamingSave();
           } catch (err) {
-            overlay.setStep("下载失败");
-            overlay.setDetail(err && err.message ? err.message : "下载失败");
+            overlay.setStep(T.dlFail);
+            overlay.setDetail(err && err.message ? err.message : T.dlFail);
             overlay.done();
           }
         });
@@ -840,7 +919,7 @@
     // MOVED UP: getSafeFilename was here, now moved before usage in logic flow
 
     const loadFFmpeg = async () => {
-       overlay.setStep("正在加载核心组件...");
+       overlay.setStep(T.coreLoad);
        
        const loadScript = (url) => new Promise((res, rej) => {
           const s = document.createElement("script");
@@ -998,7 +1077,7 @@
       let loaded = 0;
       const start = performance.now();
       
-      overlay.setStep(`正在下载${label}...`);
+      overlay.setStep(`${T.dlStep}${label}...`);
       
       while(true) {
           if (signal.aborted) throw new Error("Aborted");
@@ -1051,7 +1130,7 @@
         
         // Video
         try {
-            vBin = await fetchToFFmpeg(vUrl, "视频");
+            vBin = await fetchToFFmpeg(vUrl, T.video);
         } catch (e) {
             if (e.name === "BigFileError" || e.name === "OOMError") {
                 throw e; // Bubble up to main catch
@@ -1061,7 +1140,7 @@
 
         // Audio
         try {
-            aBin = await fetchToFFmpeg(aUrl, "音频");
+            aBin = await fetchToFFmpeg(aUrl, T.audio);
         } catch (e) {
              if (e.name === "BigFileError" || e.name === "OOMError") {
                 // If video was already downloaded in memory, we might crash here.
@@ -1092,7 +1171,7 @@
         ffmpeg.FS("unlink", "a.m4s");
 
         // Save
-        overlay.setStep("保存文件中...");
+        overlay.setStep(T.saveFile);
         
         // Prefer automatic download via <a> tag
         try {
@@ -1126,7 +1205,7 @@
             }
         }
         
-        overlay.setStep("下载完成");
+        overlay.setStep(T.dlDone);
         overlay.setProgress(100);
         overlay.done();
         setTimeout(() => overlay.remove(), 5000);
@@ -1135,31 +1214,31 @@
         console.error("Download Error", e);
         
         if (e.name === "AbortError" || e.message === "Aborted") {
-            overlay.setStep("已取消");
+            overlay.setStep(T.canceled);
             setTimeout(() => overlay.remove(), 2000);
             return;
         }
 
         // Handle Big File / OOM
         if (e.name === "BigFileError" || e.name === "OOMError" || e.message.includes("File too large")) {
-            overlay.setStep("文件过大");
-            overlay.setDetail("无法在浏览器内存中合并 >1.8GB 文件");
+            overlay.setStep(T.bigFile);
+            overlay.setDetail(T.bigFileDetail);
             
             // Allow UI update
             await new Promise(r => setTimeout(r, 100));
             
-            if (confirm(`检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？`)) {
+            if (confirm(T.bigFileConfirm)) {
                 const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
                 const safeName = getSafeFilename(takeFirstChars(baseTitle, 10));
-                triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: "视频-" + safeName + ".mp4" });
-                setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".m4a" }), 1000);
+                triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: `${T.video}-${safeName}.mp4` });
+                setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: `${T.audio}-${safeName}.m4a` }), 1000);
                 if (window.showSaveFilePicker) {
-                  overlay.addBtn("流式保存", async () => {
+                  overlay.addBtn(T.streamSave, async () => {
                     try {
                       await startSplitStreamingSave();
                     } catch (err) {
-                      overlay.setStep("下载失败");
-                      overlay.setDetail(err && err.message ? err.message : "下载失败");
+                      overlay.setStep(T.dlFailTitle);
+                      overlay.setDetail(err && err.message ? err.message : T.dlFail);
                       overlay.done();
                     }
                   });
@@ -1172,7 +1251,7 @@
 
         if (e.name === "AbortError") {
             // Already handled above, but just in case
-            overlay.setStep("已取消");
+            overlay.setStep(T.canceled);
             setTimeout(() => overlay.remove(), 2000);
             return;
         }
@@ -1183,15 +1262,15 @@
         // Wait, I cannot redefine 'vBin' here because it's inside the 'try' block in the original code.
         // I need to change the structure in the 'SearchReplace'.
         
-        overlay.setStep("出错啦");
+        overlay.setStep(T.errTitle);
         overlay.setDetail(e.message);
         
         // Check if it is a fetch error during merge (e.g. ffmpeg load)
-        if (confirm("合并失败: " + e.message + "\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)")) {
+        if (confirm(T.mergeFailConfirm.replace("{msg}", e.message))) {
              const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
              const safeName = getSafeFilename(takeFirstChars(baseTitle, 10));
-             if (vUrl) triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: "视频-" + safeName + ".mp4" });
-             if (aUrl) setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: "音频-" + safeName + ".m4a" }), 1000);
+             if (vUrl) triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: `${T.video}-${safeName}.mp4` });
+             if (aUrl) setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: `${T.audio}-${safeName}.m4a` }), 1000);
         }
     }
 
@@ -1207,13 +1286,13 @@
         // We must rely on DOM.
         const step = overlay.querySelector("div:nth-child(2)"); // Step div
         const detail = overlay.querySelector("div:nth-child(4)"); // Detail div
-        if (step) step.textContent = "出错啦";
+        if (step) step.textContent = T.errTitle;
         if (detail) detail.textContent = err.message;
         
         // Add a close button if not present or stuck
         // ...
     } else {
-        alert("脚本启动失败: " + err.message);
+        alert(T.scriptFail + err.message);
     }
     console.error(err);
   }

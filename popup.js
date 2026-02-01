@@ -1,9 +1,64 @@
+const I18N = {
+  zh: {
+    popupTitle: "B站离线舱-番剧电影下载器",
+    tipsTitle: "💡 使用小贴士",
+    tipMerge: "<b>自动合并</b>：首选方案，适合大多数视频，自动合成 MP4。",
+    tipSplit: "<b>自动分流</b>：当合并失败时，插件会自动尝试分别下载音视频（由浏览器接管）。",
+    tipStream: "<b>流式保存</b>：最后的兜底方案。如果以上都失败，请用此功能手动保存。",
+    btnDownload: "一键下载（最高支持8K）",
+    footerEmail: "反馈邮箱：",
+    footerSupport: "感觉不错可以支持个鸡腿：",
+    linkSupport: "支持",
+    msgPageError: "请在 B 站视频或番剧播放页使用",
+    msgStart: "已启动下载... (请留意网页右下角浮窗)",
+    msgError: "启动失败: "
+  },
+  en: {
+    popupTitle: "BiliDown - HD Video Downloader",
+    tipsTitle: "💡 Tips",
+    tipMerge: "<b>Auto Merge</b>: Best choice. Merges audio & video into MP4 automatically.",
+    tipSplit: "<b>Auto Split</b>: If merge fails, tries to download audio/video separately.",
+    tipStream: "<b>Stream Save</b>: Fallback. Use this to save raw tracks if others fail.",
+    btnDownload: "One-Click Download (Max 8K)",
+    footerEmail: "Feedback: ",
+    footerSupport: "Support me: ",
+    linkSupport: "Donate",
+    msgPageError: "Please use on Bilibili video/anime page",
+    msgStart: "Started... (Check bottom-right overlay)",
+    msgError: "Failed: "
+  }
+};
+
+let currentLang = localStorage.getItem("bili_lang") || (navigator.language.startsWith("zh") ? "zh" : "en");
+
+function updateLang(lang) {
+  currentLang = lang;
+  localStorage.setItem("bili_lang", lang);
+  const t = I18N[lang];
+  
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    if (t[key]) el.innerHTML = t[key];
+  });
+  
+  const btn = document.getElementById("langToggle");
+  btn.textContent = lang === "zh" ? "EN" : "中";
+}
+
+document.getElementById("langToggle").addEventListener("click", () => {
+  updateLang(currentLang === "zh" ? "en" : "zh");
+});
+
+// Initialize language
+updateLang(currentLang);
+
 document.getElementById("send").addEventListener("click", async () => {
   const msg = document.getElementById("msg");
+  const t = I18N[currentLang];
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.url || !/bilibili\.com\/(video|bangumi\/play)\//i.test(tab.url)) {
-      msg.textContent = "请在 B 站视频或番剧播放页使用";
+      msg.textContent = t.msgPageError;
       return;
     }
     // Inject bridge script (ISOLATED) to handle storage/runtime
@@ -26,12 +81,13 @@ document.getElementById("send").addEventListener("click", async () => {
 
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: (u1, u2, u3) => {
+      func: (u1, u2, u3, lang) => {
         window.__FFMPEG_URL__ = u1;
         window.__FFMPEG_CORE_URL__ = u2;
         window.__FFMPEG_CORE_ST_URL__ = u3;
+        window.__BILI_LANG__ = lang; // Pass language to content script
       },
-      args: [ffmpegUrl, coreUrl, coreStUrl],
+      args: [ffmpegUrl, coreUrl, coreStUrl, currentLang],
       world: "MAIN"
     });
     // Inject main logic (MAIN)
@@ -47,9 +103,9 @@ document.getElementById("send").addEventListener("click", async () => {
     // statusEl.innerHTML = '<span style="color:#999">正在启动...</span>';
 
     // 不再自动关闭 popup，让用户看到启动状态
-    msg.textContent = "已启动下载... (请留意网页右下角浮窗)";
+    msg.textContent = t.msgStart;
   } catch (e) {
-    msg.textContent = "启动失败: " + (e && e.message ? e.message : "未知错误");
+    msg.textContent = t.msgError + (e && e.message ? e.message : "Unknown Error");
   }
 });
 

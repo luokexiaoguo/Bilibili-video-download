@@ -86,10 +86,17 @@ If you trigger the rescue mechanism and download split files, you can use them i
 *   **Direct Playback**: Drag and drop into modern players like [PotPlayer](https://potplayer.daum.net/) or [VLC](https://www.videolan.org/) to play directly.
 *   **Lossless Merge (Recommended)**: Use FFmpeg to instantly merge them into a standard MP4 (no quality loss):
     ```bash
-    ffmpeg -i "Video-xxx.mp4" -i "Audio-xxx.m4a" -c copy output.mp4
+    ffmpeg -i "Video-TitlePrefix.mp4" -i "Audio-TitlePrefix.m4a" -c copy output.mp4
     ```
 
-## 🔒 Privacy Policy
+## � Changelog
+
+### v1.2.4 (2026-02-01)
+- **New**: Added a language toggle button for one-click switching to English interface. All text, prompts, and menu items are fully internationalized with no hardcoded Chinese residue.
+- **Improvement**: Upgraded stream audio save format to `.m4a` (AAC encoding) to ensure direct compatibility with professional editors like DaVinci Resolve.
+- **Fix**: Fixed `ReferenceError: T is not defined` crashes during download initialization.
+
+## �� Privacy Policy
 
 This extension values your privacy. We do not sell, share, or upload your personal information. Core processing (parsing, downloading, merging) is done locally.
 

@@ -85,11 +85,16 @@ Bilibili video download\
 
 *   **直接播放**：使用 [PotPlayer](https://potplayer.daum.net/)、[VLC](https://www.videolan.org/) 等现代播放器直接拖入播放。
 *   **无损合并（推荐）**：使用 FFmpeg 瞬间合并为标准 MP4（不消耗画质）：
-    ```bash
+    ```
     ffmpeg -i "视频-xxx.mp4" -i "音频-xxx.m4a" -c copy output.mp4
     ```
 
 ## 📅 更新日志 (Changelog)
+
+### v1.2.4 (2026-02-01)
+- **新增**：新增语言切换按钮，支持一键切换至英文界面。所有文案、提示与菜单项已实现完整国际化，无硬编码中文残留。
+- **优化**：将流式音频保存格式统一升级为 `.m4a` (AAC编码)，确保达芬奇 (DaVinci Resolve) 等专业剪辑软件能直接识别，无需重命名。
+- **修复**：修复了下载初始化时可能出现的 `T is not defined` 错误。
 
 ### v1.2.3 (2026-01-22)
 - **重构**：移除所有远程 CDN 代码，完全本地化运行，严格符合 Manifest V3 规范。
