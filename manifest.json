@@ -5,7 +5,7 @@
   "description": "__MSG_appDesc__",
   "default_locale": "zh_CN",
   "version": "1.2.4",
-  "permissions": ["activeTab", "tabs", "storage", "downloads", "scripting", "declarativeNetRequest", "declarativeNetRequestWithHostAccess"],
+  "permissions": ["activeTab", "storage", "downloads", "scripting", "declarativeNetRequest"],
   "host_permissions": [
     "https://*.bilibili.com/*",
     "https://*.bilivideo.com/*",

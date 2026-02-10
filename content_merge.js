@@ -699,7 +699,11 @@
           const reader = res.body.getReader();
           let loaded = 0;
           const start = performance.now();
-          overlay.setStep(`${T.saving}${label}...`);
+          let lastUiUpdate = 0;
+
+          // Don't update step title here, as it might overwrite "Downloading Video" with "Saving Audio" too early
+          // overlay.setStep(`${T.saving}${label}...`); 
+          
           while (true) {
             // Check abort signal
             if (signal.aborted) throw new Error("Aborted");
@@ -712,15 +716,30 @@
             
             await writable.write(value);
             loaded += value.length;
-            if (total) {
-              const p = (loaded / total) * 100;
-              overlay.setProgress(progressBase + p * progressScale);
+            
+            const now = performance.now();
+            if (now - lastUiUpdate > 200) { // Throttle UI update to every 200ms
+                lastUiUpdate = now;
+                if (total) {
+                  const p = (loaded / total) * 100;
+                  overlay.setProgress(progressBase + p * progressScale);
+                  const elapsed = (now - start) / 1000;
+                  const speed = loaded / Math.max(0.1, elapsed);
+                  overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
+                } else {
+                  overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
+                }
+            }
+          }
+          
+          // Final update to ensure 100% or final size is shown
+          if (total) {
+              overlay.setProgress(progressBase + 100 * progressScale);
               const elapsed = (performance.now() - start) / 1000;
               const speed = loaded / Math.max(0.1, elapsed);
               overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
-            } else {
+          } else {
               overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
-            }
           }
 
           if (loaded <= 0) {
@@ -855,6 +874,7 @@
       }
 
       overlay.setProgress(0);
+      overlay.setStep(T.dlStep + "..."); // Set a generic downloading title
       
       // 2. 执行保存
       // Parallel execution to download both streams simultaneously
@@ -1227,6 +1247,23 @@
             // Allow UI update
             await new Promise(r => setTimeout(r, 100));
             
+            // Auto switch to Stream Save if supported
+            if (window.showSaveFilePicker) {
+                 try {
+                      await startSplitStreamingSave();
+                 } catch (err) {
+                      if (err.name === 'AbortError' || err.message === 'Aborted') {
+                          overlay.setStep(T.canceled);
+                          setTimeout(() => overlay.remove(), 2000);
+                          return;
+                      }
+                      overlay.setStep(T.dlFailTitle);
+                      overlay.setDetail(err && err.message ? err.message : T.dlFail);
+                      overlay.done();
+                 }
+                 return;
+            }
+
             if (confirm(T.bigFileConfirm)) {
                 const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
                 const safeName = getSafeFilename(takeFirstChars(baseTitle, 10));

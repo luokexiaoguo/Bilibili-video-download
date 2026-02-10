@@ -198,10 +198,3 @@ chrome.downloads.onChanged.addListener(async (delta) => {
     }
   }
 });
-
-// Listen for tab updates
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    // You can add tab-specific logic here
-  }
-});

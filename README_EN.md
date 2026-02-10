@@ -94,6 +94,9 @@ If you trigger the rescue mechanism and download split files, you can use them i
 ### v1.2.4 (2026-02-01)
 - **New**: Added a language toggle button for one-click switching to English interface. All text, prompts, and menu items are fully internationalized with no hardcoded Chinese residue.
 - **Improvement**: Upgraded stream audio save format to `.m4a` (AAC encoding) to ensure direct compatibility with professional editors like DaVinci Resolve.
+- **Improvement**: Significantly improved UI performance during stream downloads by adding progress throttling, resolving page freeze issues with large files.
+- **Improvement**: Enhanced stream save dialog experience by automatically triggering save prompts (no secondary confirmation needed) and fixed progress title display issues.
+- **Fix**: Fixed `ReferenceError: T is not defined` crashes during download initialization.
 
 ## �� Privacy Policy
 
