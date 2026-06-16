@@ -91,6 +91,15 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.6 (2026-06-16)
+- **Fix**: Multi-part videos now download the correct episode selected by the user.
+- **Fix**: FFmpeg WASM loading failure resolved by using direct extension URLs instead of oversized data URLs.
+- **Fix**: File save dialog now opens before FFmpeg merge (prevents user gesture expiration SecurityError).
+- **Fix**: Canceling a download no longer triggers the split-download confirmation dialog.
+- **Fix**: Restored comprehensive HDR/SDR track detection rules from v1.2.3.
+- **Optimization**: Injected COOP/COEP response headers via declarativeNetRequest to enable SharedArrayBuffer for FFmpeg multi-threaded mode.
+- **Optimization**: Service worker simplified to file verification (HEAD requests) instead of base64 transfer, significantly faster response.
+
 ### v1.2.5 (2026-02-01)
 - **Improvement**: Significantly improved UI performance during stream downloads by adding progress throttling, resolving page freeze issues with large files.
 - **Improvement**: Enhanced stream save dialog experience by automatically triggering save prompts (no secondary confirmation needed) and fixed progress title display issues.

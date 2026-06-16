@@ -1,0 +1,742 @@
+(async () => {
+  try {
+    console.log("[BilibiliDownloader] Script started");
+
+    const lang = window.__BILI_LANG__ || "zh";
+    const preferHDR = window.__BILI_DOWN_PREF__?.preferHDR === true;
+    console.log("[BilibiliDownloader] HDR Preference:", preferHDR ? "HDR" : "SDR");
+
+    const T = {
+      zh: {
+        title: "B站离线舱",
+        init: "初始化中...",
+        cancel: "取消",
+        close: "关闭",
+        confirmCancel: "确定要取消下载吗？",
+        parse: "正在解析视频信息...",
+        parseErr: "解析出错",
+        noInfo: "未找到视频流信息",
+        noInfoDetail: "无法获取 DASH 格式地址，请确认视频是否有效或需要登录。",
+        noTrack: "解析失败",
+        noTrackDetail: "未找到有效的视频或音频轨道。",
+        browserDl: "已调用浏览器下载",
+        browserDlDetail: "请查看浏览器右上角下载列表",
+        saving: "正在保存",
+        dlFail: "下载失败",
+        exportAudio: "正在导出音频...",
+        dlDone: "下载完成",
+        dlFailTitle: "下载失败",
+        streamSave: "流式保存",
+        coreLoad: "正在加载核心组件...",
+        dlStep: "正在下载",
+        merge: "正在合并...",
+        saveFile: "保存文件中...",
+        canceled: "已取消",
+        bigFile: "文件过大",
+        bigFileDetail: "无法在浏览器内存中合并 >1.8GB 文件",
+        bigFileConfirm: "检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？",
+        errTitle: "出错啦",
+        mergeFailConfirm: "合并失败: {msg}\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)",
+        video: "视频",
+        audio: "音频",
+        noStreamSave: "当前浏览器不支持流式保存",
+        selectAudio: "请继续选择音频保存位置...",
+        scriptFail: "脚本启动失败: ",
+        multiPartDetected: "检测到多P视频，请选择要下载的分P"
+      },
+      en: {
+        title: "BiliDown",
+        init: "Initializing...",
+        cancel: "Cancel",
+        close: "Close",
+        confirmCancel: "Confirm cancel download?",
+        parse: "Parsing video info...",
+        parseErr: "Parse Error",
+        noInfo: "Video info not found",
+        noInfoDetail: "Cannot fetch DASH url. Please check video validity or login.",
+        noTrack: "Parse Failed",
+        noTrackDetail: "No valid video or audio track found.",
+        browserDl: "Browser download started",
+        browserDlDetail: "Check browser download list.",
+        saving: "Saving ",
+        dlFail: "Download Failed",
+        exportAudio: "Exporting Audio...",
+        dlDone: "Download Complete",
+        dlFailTitle: "Download Failed",
+        streamSave: "Stream Save",
+        coreLoad: "Loading Core...",
+        dlStep: "Downloading ",
+        merge: "Merging...",
+        saveFile: "Saving file...",
+        canceled: "Canceled",
+        bigFile: "File Too Large",
+        bigFileDetail: "Cannot merge >1.8GB file in browser memory",
+        bigFileConfirm: "File too large (or OOM). Cannot merge.\n\nDownload video/audio separately?",
+        errTitle: "Error",
+        mergeFailConfirm: "Merge failed: {msg}\n\nDownload fetched video/audio tracks separately?\n(Data will be lost if not saved)",
+        video: "Video",
+        audio: "Audio",
+        noStreamSave: "Browser does not support stream save",
+        selectAudio: "Select location for AUDIO file...",
+        scriptFail: "Script failed to start: ",
+        multiPartDetected: "Multi-part video detected. Select which part to download."
+      }
+    }[lang];
+
+    // ============================================================
+    // 1. Overlay UI Component
+    // ============================================================
+    const overlay = (() => {
+      const el = document.createElement("div");
+      el.id = "bili-download-overlay";
+      el.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;background:rgba(0,0,0,0.85);color:#fff;font:14px/1.6 system-ui,sans-serif;padding:16px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);min-width:260px;max-width:360px;user-select:none;cursor:move;";
+
+      let isDrag = false, sx, sy, il, it;
+      el.addEventListener("mousedown", e => {
+        if (e.target.tagName === "BUTTON") return;
+        isDrag = true; sx = e.clientX; sy = e.clientY;
+        const r = el.getBoundingClientRect(); il = r.left; it = r.top;
+        el.style.right = "auto"; el.style.bottom = "auto";
+        el.style.left = il + "px"; el.style.top = it + "px";
+        e.preventDefault();
+      });
+      window.addEventListener("mousemove", e => { if (!isDrag) return; el.style.left = (il + e.clientX - sx) + "px"; el.style.top = (it + e.clientY - sy) + "px"; });
+      window.addEventListener("mouseup", () => isDrag = false);
+
+      const titleDiv = document.createElement("div");
+      titleDiv.style.cssText = "font-weight:bold;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:4px;";
+      titleDiv.textContent = T.title;
+      el.appendChild(titleDiv);
+
+      const stepDiv = document.createElement("div");
+      el.appendChild(stepDiv);
+
+      const barCon = document.createElement("div");
+      barCon.style.cssText = "margin-top:8px;height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden;";
+      const barDiv = document.createElement("div");
+      barDiv.style.cssText = "height:100%;width:0%;background:#00aeec;transition:width 0.2s;";
+      barCon.appendChild(barDiv);
+      el.appendChild(barCon);
+
+      const detailDiv = document.createElement("div");
+      detailDiv.style.cssText = "margin-top:8px;font-size:12px;opacity:0.8;word-break:break-all;";
+      el.appendChild(detailDiv);
+
+      const btnArea = document.createElement("div");
+      btnArea.style.cssText = "margin-top:12px;display:flex;justify-content:flex-end;gap:10px;";
+      el.appendChild(btnArea);
+
+      const mkBtn = (txt, color, onClk) => {
+        const b = document.createElement("button");
+        b.textContent = txt;
+        b.style.cssText = "background:transparent;border:none;color:" + color + ";cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
+        b.onclick = onClk;
+        return b;
+      };
+
+      const cancelBtn = mkBtn(T.cancel, "#ff6b6b", () => { if (confirm(T.confirmCancel)) { controller.abort(); el.remove(); } });
+      btnArea.appendChild(cancelBtn);
+      document.body.appendChild(el);
+
+      return {
+        setStep: t => { stepDiv.textContent = t; },
+        setProgress: p => { barDiv.style.width = Math.max(0, Math.min(100, p)) + "%"; },
+        setDetail: t => { detailDiv.textContent = t; },
+        addBtn: (txt, onClk) => {
+          const b = mkBtn(txt, "#4cc9f0", onClk);
+          b.style.cssText = "margin-right:8px;text-decoration:none;background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:4px;";
+          btnArea.insertBefore(b, cancelBtn);
+          return b;
+        },
+        done: () => {
+          cancelBtn.textContent = T.close;
+          cancelBtn.style.cssText = "background:transparent;border:none;color:#fff;cursor:pointer;font-size:12px;padding:0;text-decoration:none;";
+          cancelBtn.onclick = () => el.remove();
+        },
+        resetCancel: () => {
+          cancelBtn.textContent = T.cancel;
+          cancelBtn.style.cssText = "background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
+          cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); el.remove(); } };
+        },
+        remove: () => el.remove()
+      };
+    })();
+
+    window.addEventListener("BILI_DOWN_STATUS", e => { if (e.detail) window.dispatchEvent(new CustomEvent("BILI_BRIDGE_STATUS_UPDATE", { detail: e.detail })); });
+
+    const controller = new AbortController();
+    const signal = controller.signal;
+
+    // ============================================================
+    // 2. Utilities
+    // ============================================================
+    const fetchWithTimeout = async (url, opts = {}) => {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), opts.timeout || 8000);
+      try { const r = await fetch(url, { ...opts, signal: ctrl.signal }); clearTimeout(id); return r; }
+      catch (e) { clearTimeout(id); throw e; }
+    };
+
+    const fmtBytes = n => {
+      if (!n && n !== 0) return "";
+      const u = ["B","KB","MB","GB"]; let i = 0, v = n;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return v.toFixed(1) + " " + u[i];
+    };
+
+    // ============================================================
+    // 3. Multi-Part Selector
+    // ============================================================
+    const getMultiPartInfo = () => {
+      try {
+        const st = window.__INITIAL_STATE__ || {};
+        const pages = (st.videoData || {}).pages || (st.metadata || {}).list || [];
+        if (pages.length > 1) {
+          const p = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
+          return { pages, currentIndex: Math.min(p, pages.length - 1) };
+        }
+      } catch (_) {}
+      return null;
+    };
+
+    const showPartSelector = (pages, currentIndex) => {
+      return new Promise(resolve => {
+        const c = document.createElement("div");
+        c.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2147483647;display:flex;align-items:center;justify-content:center;";
+        const box = document.createElement("div");
+        box.style.cssText = "background:#1f1f1f;color:#fff;padding:24px;border-radius:12px;min-width:320px;max-width:480px;max-height:80vh;overflow:auto;font-family:system-ui,sans-serif;";
+        const t = document.createElement("h3");
+        t.textContent = T.multiPartDetected;
+        t.style.cssText = "margin:0 0 16px 0;color:#FB7299;";
+        box.appendChild(t);
+        const list = document.createElement("div");
+        list.style.cssText = "max-height:400px;overflow-y:auto;";
+        pages.forEach((p, i) => {
+          const n = p.part || p.title || `P${i+1}`;
+          const b = document.createElement("button");
+          b.textContent = `${i+1}. ${n}`;
+          b.style.cssText = `display:block;width:100%;padding:10px 12px;margin-bottom:8px;background:${i===currentIndex?'#FB7299':'#2d2d2d'};color:#fff;border:none;border-radius:6px;text-align:left;cursor:pointer;font-size:13px;font-weight:${i===currentIndex?'bold':'normal'};`;
+          b.onclick = () => { c.remove(); resolve({ index: i, page: p }); };
+          list.appendChild(b);
+        });
+        const cb = document.createElement("button");
+        cb.textContent = T.cancel;
+        cb.style.cssText = "display:block;width:100%;padding:8px 16px;margin-top:8px;background:transparent;border:1px solid #666;color:#aaa;border-radius:6px;cursor:pointer;";
+        cb.onclick = () => { c.remove(); resolve(null); };
+        box.appendChild(list); box.appendChild(cb); c.appendChild(box); document.body.appendChild(c);
+      });
+    };
+
+    // ============================================================
+    // 4. Bilibili API
+    // ============================================================
+    const getBvid = async () => {
+      const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
+      if (m) {
+        const pi = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
+        let pc = null, pt = null;
+        try {
+          const pg = (window.__INITIAL_STATE__?.videoData || {}).pages || [];
+          if (pg[pi]) { pc = pg[pi].cid; pt = pg[pi].part || pg[pi].title; }
+        } catch (_) {}
+        return { bvid: m[1], cid: pc, pageIndex: pi, pageTitle: pt };
+      }
+
+      const ep = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
+      if (ep) {
+        const eid = ep[1];
+        try {
+          if (window.__INITIAL_STATE__) {
+            const s = window.__INITIAL_STATE__;
+            if (s.epInfo?.id == eid && s.epInfo.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: eid };
+            const f = (s.epList || []).find(e => e.id == eid);
+            if (f?.bvid) return { bvid: f.bvid, cid: f.cid, epId: eid };
+          }
+        } catch (_) {}
+        try {
+          const r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?ep_id=${eid}`);
+          const j = await r.json();
+          const eps = (j?.result || {}).episodes || [];
+          let t = eps.find(e => e.id == eid);
+          if (!t && j?.result?.sections) for (const s of j.result.sections) { t = s.episodes?.find(e => e.id == eid); if (t) break; }
+          if (t?.bvid) return { bvid: t.bvid, cid: t.cid, epId: eid };
+        } catch (_) {}
+      }
+
+      const ss = location.pathname.match(/\/bangumi\/play\/ss(\d+)/i);
+      if (ss) {
+        const sid = ss[1];
+        try {
+          if (window.__INITIAL_STATE__) {
+            const s = window.__INITIAL_STATE__;
+            if (s.epInfo?.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: s.epInfo.id };
+            if (s.epList?.length > 0) return { bvid: s.epList[0].bvid, cid: s.epList[0].cid, epId: s.epList[0].id };
+          }
+        } catch (_) {}
+        try {
+          const r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${sid}`);
+          const j = await r.json();
+          const eps = (j?.result || {}).episodes || [];
+          if (eps[0]) return { bvid: eps[0].bvid, cid: eps[0].cid, epId: eps[0].id };
+        } catch (_) {}
+      }
+
+      try {
+        const s = window.__INITIAL_STATE__ || {};
+        if (s.bvid) return { bvid: s.bvid, cid: s.cid };
+        if (s.epInfo?.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: s.epInfo.id };
+        if (s.videoData?.bvid) return { bvid: s.videoData.bvid, cid: s.videoData.cid };
+      } catch (_) {}
+      return null;
+    };
+
+    async function resolveBilibili(specificCid) {
+      const p = window.__playinfo__ || window.playinfo;
+      if (p?.dash) return p.dash;
+
+      try {
+        const m = document.body.innerHTML.match(/window\.__playinfo__=({.*?})/);
+        if (m) { const d = JSON.parse(m[1]); if (d.dash || d.data?.dash) return d.dash || d.data.dash; }
+      } catch (_) {}
+
+      const info = await getBvid();
+      if (!info) return null;
+      const { bvid, epId } = info;
+      let cid = specificCid || info.cid;
+
+      if (!cid && bvid) {
+        const vr = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
+        const vj = await vr.json();
+        const vd = vj?.data || {};
+        if (!specificCid && vd.pages?.length > 0) {
+          const pi = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
+          cid = vd.pages[pi]?.cid || vd.cid || vd.pages[0]?.cid || 0;
+        } else cid = vd.cid || vd.pages?.[0]?.cid || 0;
+      }
+      if (!cid && !epId) return null;
+
+      let dash = null;
+      if (bvid && cid) {
+        try {
+          const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${bvid}&qn=127&fnval=4096&fourk=1`, { credentials: "include" });
+          const pj = await pr.json();
+          if (pj?.data?.dash) dash = pj.data.dash;
+        } catch (_) {}
+      }
+      if (!dash && (epId || (bvid && cid))) {
+        let u = `https://api.bilibili.com/pgc/player/web/playurl?qn=127&fnval=4096&fourk=1`;
+        if (epId) u += `&ep_id=${epId}`; else u += `&cid=${cid}&bvid=${bvid}`;
+        try { const pr = await fetchWithTimeout(u, { credentials: "include" }); const pj = await pr.json(); if (pj?.result?.dash || pj?.data?.dash) dash = pj.result.dash || pj.data.dash; } catch (_) {}
+      }
+      return dash;
+    }
+
+    // ============================================================
+    // 5. Track Selection
+    // ============================================================
+    const getAllUrls = t => {
+      if (!t) return [];
+      const o = [];
+      const p = u => { if (u && !o.includes(u)) o.push(u); };
+      p(t.baseUrl || t.base_url || t.url);
+      if (Array.isArray(t.backupUrl || t.backup_url)) for (const u of t.backupUrl || t.backup_url) p(u);
+      return o;
+    };
+
+    const isHdr = x => {
+      if (!x) return false;
+      const cid = Number(x.codecid || x.codecId || 0);
+      if (cid === 125 || cid === 126 || cid === 127) return true;
+      const cs = String(x.color_space || x.colorSpace || "").toLowerCase();
+      if (/bt2020|2020/i.test(cs)) return true;
+      const tc = Number(x.transfer_characteristics ?? x.transferCharacteristics ?? x.trc ?? x.transfer ?? x.hdr_type ?? x.hdrType ?? 0);
+      if (tc === 16 || tc === 18) return true;
+      const sig = JSON.stringify({ codecs: x.codecs, hdr: x.hdr, dovi: x.dolby_vision || x.dolbyVision, color: cs, transfer: tc }).toLowerCase();
+      return /dolby|vision|dovi|dvhe|dvh1|hdr10|hlg|pq|smpte2084/i.test(sig);
+    };
+
+    const pickBestVideo = (arr, wantHdr) => {
+      if (!arr?.length) return null;
+      const nonDrm = arr.filter(x => { const v = x && (x.drm_tech_type ?? x.drmTechType ?? x.is_drm ?? x.isDrm); return !(Number(v) > 0 || v === true); });
+      const pool = nonDrm.length ? nonDrm : arr;
+      const sdr = pool.filter(x => !isHdr(x)), hdr = pool.filter(x => isHdr(x));
+      let target = wantHdr ? (hdr.length ? hdr : sdr) : (sdr.length ? sdr : hdr);
+      const isHevc = x => x.codecid === 12 || /hev1|hvc1/i.test(String(x.codecs || ""));
+      const isAvc = x => x.codecid === 7 || /avc1/i.test(String(x.codecs || ""));
+      const isAv1 = x => x.codecid === 13 || /av01/i.test(String(x.codecs || ""));
+      for (const arr of [target.filter(isHevc), target.filter(isAvc), target.filter(isAv1)]) {
+        if (arr.length) { arr.sort((a,b) => (b.bandwidth||0)-(a.bandwidth||0)); return arr[0].baseUrl || arr[0].base_url || arr[0].url; }
+      }
+      target.sort((a,b) => (b.bandwidth||0)-(a.bandwidth||0));
+      return target[0]?.baseUrl || target[0]?.base_url || target[0]?.url;
+    };
+
+    const pickBestAudio = arr => {
+      if (!arr?.length) return { url: null, track: null, urls: [] };
+      let best = null, urls = [];
+      for (const t of arr) {
+        const id = Number(t?.id)||0, bw = Number(t?.bandwidth)||0;
+        const u0 = t && (t.baseUrl || t.base_url || t.url);
+        if (!best || id > best.id || (id === best.id && bw > best.bw)) best = { id, bw, track: t, url: u0 };
+        for (const u of getAllUrls(t)) if (u && !urls.includes(u)) urls.push(u);
+      }
+      return { url: best?.url, track: best?.track, urls };
+    };
+
+    const safeName = n => {
+      if (!n) return "bilibili_video";
+      let s = String(n);
+      try { s = s.normalize('NFKC'); } catch (_) {}
+      s = s.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "").replace(/[\u0000-\u001F\u007F]/g, "").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+      return s || "bilibili_video";
+    };
+
+    // ============================================================
+    // 6. Streaming Download (single file handle, progress tracking)
+    // ============================================================
+    const streamDownload = async ({ url, filename, onProgress }) => {
+      if (!window.showSaveFilePicker) throw new Error(T.noStreamSave);
+      const handle = await window.showSaveFilePicker({ suggestedName: filename });
+      let writable;
+      try { writable = await handle.createWritable({ keepExistingData: false }); }
+      catch (_) { writable = await handle.createWritable(); }
+
+      let res;
+      try {
+        res = await fetch(url, { credentials: "include", referrer: location.href, referrerPolicy: "strict-origin-when-cross-origin", signal });
+        if (res?.status === 403) res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+        if (!res?.ok || !res?.body) throw new Error("fetch_failed");
+      } catch {
+        res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+      }
+
+      const total = Number(res.headers.get("content-length")) || 0;
+      const reader = res.body.getReader();
+      let loaded = 0, lastUpdate = 0;
+      const start = performance.now();
+
+      while (true) {
+        if (signal.aborted) { try { await writable.abort(); } catch (_) {} throw new Error("Aborted"); }
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+        loaded += value.length;
+        const now = performance.now();
+        if (now - lastUpdate > 200) {
+          lastUpdate = now;
+          const elapsed = (now - start) / 1000;
+          const speed = loaded / Math.max(0.1, elapsed);
+          const pct = total ? (loaded / total) * 100 : 0;
+          if (onProgress) onProgress({ loaded, total, speed, pct });
+        }
+      }
+      await writable.close();
+      return { loaded, total };
+    };
+
+    // ============================================================
+    // 7. Streaming Merge (FFmpeg-free, sequential streams)
+    // ============================================================
+    const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
+      if (!window.showSaveFilePicker) {
+        // Fallback: download via service worker (separate files)
+        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+        return;
+      }
+
+      overlay.setStep(T.coreLoad);
+      overlay.setDetail("准备下载...");
+
+      // Request FFmpeg files from service worker (bypasses content-script cross-origin restriction)
+      const requestFFmpegFromSW = () => new Promise((resolve, reject) => {
+        console.log("[FFmpeg] Requesting FFmpeg from service worker...");
+        window.dispatchEvent(new CustomEvent("BILI_BRIDGE_GET_FFMPEG", { detail: { resolve, reject } }));
+        
+        setTimeout(() => reject(new Error("FFmpeg request timeout")), 30000);
+      });
+
+      // Load FFmpeg - request from service worker (the reliable path)
+      const loadFFmpeg = async () => {
+        console.log("[FFmpeg] Starting loadFFmpeg via service worker...");
+        console.log("[FFmpeg] SharedArrayBuffer:", !!window.SharedArrayBuffer);
+
+        // Load ffmpeg.min.js first via script tag
+        const ffmpegUrl = window.__FFMPEG_URL__;
+        if (ffmpegUrl && !window.FFmpeg) {
+          console.log("[FFmpeg] Loading ffmpeg.min.js via script tag:", ffmpegUrl);
+          await new Promise((res, rej) => {
+            const s = document.createElement("script");
+            s.src = ffmpegUrl;
+            s.onload = () => { console.log("[FFmpeg] ffmpeg.min.js loaded OK"); res(); };
+            s.onerror = (e) => { console.error("[FFmpeg] ffmpeg.min.js load error:", e); rej(new Error("ffmpeg.min.js failed")); };
+            (document.head || document.documentElement).appendChild(s);
+          });
+        }
+        if (!window.FFmpeg?.createFFmpeg) throw new Error("FFmpeg library not loaded");
+
+        // Request core files from service worker (JS text + WASM base64)
+        const files = await requestFFmpegFromSW();
+        if (!files?.length) throw new Error("No FFmpeg files received from SW");
+
+        const getFile = path => { const f = files.find(x => x.path === path); if (!f) throw new Error("Missing: " + path); return f; };
+
+        // Determine MT vs ST
+        const useMT = !!window.SharedArrayBuffer;
+        const coreFile = useMT ? getFile('ffmpeg/ffmpeg-core.js') : (files.find(f => f.path === 'ffmpeg/ffmpeg-core-st.js') || getFile('ffmpeg/ffmpeg-core.js'));
+        const wasmFile = useMT ? getFile('ffmpeg/ffmpeg-core.wasm') : (files.find(f => f.path === 'ffmpeg/ffmpeg-core-st.wasm') || getFile('ffmpeg/ffmpeg-core.wasm'));
+
+        console.log("[FFmpeg] Using", useMT ? "MT" : "ST", "core:", coreFile.path, coreFile.size + "B, wasm:", wasmFile.size + "B");
+        console.log("[FFmpeg] WASM base64 length:", wasmFile.content?.length || 0);
+
+        // Create data: URL for WASM (self-contained, no external loading)
+        const wasmDataUrl = 'data:application/wasm;base64,' + wasmFile.b64;
+        console.log("[FFmpeg] WASM data: URL length:", wasmDataUrl.length);
+
+        // Create data: URL for core JS, with locateFile override injected
+        const wasmName = coreFile.path.includes("st") ? "ffmpeg-core-st.wasm" : "ffmpeg-core.wasm";
+        const locatorOverride = `var __wasmDataUrl="${wasmDataUrl}";var Module=typeof Module!=='undefined'?Module:{};var __origLocateFile=Module.locateFile;Module.locateFile=function(p){if(p&&p.endsWith('.wasm'))return __wasmDataUrl;return __origLocateFile?__origLocateFile(p):p;};
+`;
+        // The locator override is pure ASCII, so we can btoa it safely in content script
+        const coreDataUrl = 'data:application/javascript;base64,' + btoa(locatorOverride) + ',' + coreFile.b64;
+        console.log("[FFmpeg] Core JS data: URL length:", coreDataUrl.length);
+
+        // Load the patched core JS via script tag
+        await new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = coreDataUrl;
+          s.onload = () => { console.log("[FFmpeg] Patched core JS executed OK"); res(); };
+          s.onerror = (e) => { console.error("[FFmpeg] Patched core JS error:", e); rej(new Error("Core JS script failed")); };
+          (document.head || document.documentElement).appendChild(s);
+        });
+
+        const createFFmpeg = window.FFmpeg.createFFmpeg;
+
+        // Create FFmpeg - WASM is now self-contained via data: URL in locateFile override
+        const ffmpeg = createFFmpeg({ wasmPath: wasmDataUrl, log: false });
+        console.log("[FFmpeg] Calling ffmpeg.load()...");
+        try {
+          await ffmpeg.load();
+          console.log("[FFmpeg] FFmpeg loaded successfully!");
+          return ffmpeg;
+        } catch (e) {
+          console.error("[FFmpeg] ffmpeg.load() failed:", e);
+          throw e;
+        }
+      };
+
+      // Fetch into memory
+      const fetchBin = async (url, label) => {
+        overlay.setStep(`${T.dlStep}${label}...`);
+        let res;
+        try {
+          res = await fetch(url, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin", signal });
+          if (!res?.ok) throw new Error();
+        } catch {
+          res = await fetch(url, { credentials: "include", referrer: "https://www.bilibili.com/", signal });
+        }
+        if (!res?.ok) throw new Error(`${label} fetch failed`);
+        const total = Number(res.headers.get("content-length")) || 0;
+        const reader = res.body.getReader();
+        const chunks = []; let loaded = 0;
+        const start = performance.now();
+        while (true) {
+          if (signal.aborted) throw new Error("Aborted");
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value); loaded += value.length;
+          const elapsed = (performance.now() - start) / 1000;
+          const pct = total ? (loaded / total) * 100 : 0;
+          overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(loaded/Math.max(0.1,elapsed))}/s) ${pct.toFixed(0)}%`);
+        }
+        const buf = new Uint8Array(loaded);
+        let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+        return buf;
+      };
+
+      // Try streaming merge first
+      const useStreamingMerge = true; // Set to false to use memory merge
+
+      if (useStreamingMerge) {
+        // Sequential streaming: download both to temp blob, merge in memory with FFmpeg
+        // This keeps things simple without needing a separate muxer lib
+        overlay.setStep(`${T.dlStep}${T.video}...`);
+        overlay.setProgress(5);
+
+        let vBin, aBin;
+        try {
+          vBin = await fetchBin(vUrl, T.video);
+        } catch(e) { if (e.message === "Aborted") throw e; vBin = null; }
+
+        overlay.setProgress(45);
+        overlay.setStep(`${T.dlStep}${T.audio}...`);
+        try {
+          aBin = await fetchBin(aUrl, T.audio);
+        } catch(e) { if (e.message === "Aborted") throw e; aBin = null; }
+
+        if (!vBin || !aBin) throw new Error("Failed to fetch video/audio data");
+
+        overlay.setStep(T.merge);
+        overlay.setProgress(85);
+
+        try {
+          const ffmpeg = await loadFFmpeg();
+          ffmpeg.FS("writeFile", "v.m4s", vBin);
+          ffmpeg.FS("writeFile", "a.m4s", aBin);
+          await ffmpeg.run("-i", "v.m4s", "-i", "a.m4s", "-c", "copy", "out.mp4");
+          const out = ffmpeg.FS("readFile", "out.mp4");
+          ffmpeg.FS("unlink", "out.mp4"); ffmpeg.FS("unlink", "v.m4s"); ffmpeg.FS("unlink", "a.m4s");
+          vBin = null; aBin = null;
+
+          // Save via File System Access API
+          overlay.setStep(T.saveFile);
+          const handle = await window.showSaveFilePicker({
+            suggestedName: filename + ".mp4",
+            types: [{ description: 'MP4', accept: {'video/mp4': ['.mp4']} }]
+          });
+          const w = await handle.createWritable();
+          await w.write(out);
+          await w.close();
+
+          overlay.setStep(T.dlDone);
+          overlay.setProgress(100);
+          overlay.done();
+          setTimeout(() => overlay.remove(), 5000);
+          return;
+        } catch(e) {
+          console.warn("[FFmpeg] Merge failed:", e);
+          // Fall through to streaming save fallback
+        }
+      }
+
+      // Fallback: streaming save to separate handles (no FFmpeg merge)
+      // This is the "big file" path - saves video and audio as separate files
+      overlay.setStep(`${T.dlStep}${T.video}...`);
+      overlay.setProgress(0);
+      overlay.resetCancel();
+
+      try {
+        const { loaded: vLoaded, total: vTotal } = await streamDownload({
+          url: vUrl, filename: `${T.video}-${filename}.mp4`,
+          onProgress: ({ loaded, total, speed, pct }) => {
+            overlay.setProgress(pct * 0.8);
+            overlay.setDetail(`${T.video}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
+          }
+        });
+
+        overlay.setDetail(T.selectAudio);
+        overlay.setProgress(80);
+
+        const { loaded: aLoaded, total: aTotal } = await streamDownload({
+          url: aUrl, filename: `${T.audio}-${filename}.m4a`,
+          onProgress: ({ loaded, total, speed, pct }) => {
+            overlay.setProgress(80 + pct * 0.2);
+            overlay.setDetail(`${T.audio}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
+          }
+        });
+
+        overlay.setStep(T.dlDone);
+        overlay.setProgress(100);
+        overlay.done();
+        setTimeout(() => overlay.remove(), 5000);
+      } catch(e) {
+        if (e?.name === 'AbortError' || e?.message === 'Aborted') {
+          overlay.setStep(T.canceled);
+          setTimeout(() => overlay.remove(), 2000);
+          return;
+        }
+        throw e;
+      }
+    };
+
+    const triggerBgDownload = payload => {
+      overlay.setStep(T.browserDl);
+      overlay.setProgress(100);
+      overlay.setDetail(T.browserDlDetail);
+      overlay.done();
+      window.dispatchEvent(new CustomEvent("BILI_TRIGGER_DOWNLOAD", { detail: payload }));
+    };
+
+    window.addEventListener("BILI_DOWNLOAD_ERROR", e => {
+      overlay.setStep(T.dlFailTitle);
+      overlay.setDetail(e?.detail?.message || T.dlFail);
+      overlay.done();
+    });
+
+    // ============================================================
+    // 8. Main Flow
+    // ============================================================
+    overlay.setStep(T.parse);
+
+    const mpi = getMultiPartInfo();
+    let selIdx = 0, selPage = null;
+    if (mpi?.pages?.length > 1) {
+      const sel = await showPartSelector(mpi.pages, mpi.currentIndex);
+      if (!sel) { overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return; }
+      selIdx = sel.index; selPage = sel.page;
+    }
+
+    let dash;
+    try {
+      dash = await Promise.race([resolveBilibili(selPage?.cid), new Promise((_, r) => setTimeout(() => r(new Error("超时")), 10000))]);
+    } catch(e) {
+      overlay.setStep(T.parseErr); overlay.setDetail(e.message); overlay.done(); return;
+    }
+    if (!dash) { overlay.setStep(T.noInfo); overlay.setDetail(T.noInfoDetail); overlay.done(); setTimeout(() => overlay.remove(), 6000); return; }
+
+    const vArr = dash.video, aArr = dash.audio;
+    const vUrl = pickBestVideo(vArr, preferHDR);
+    const aPick = pickBestAudio(aArr);
+    const aUrl = aPick.url;
+    const vTrack = (vArr || []).find(x => (x.baseUrl || x.base_url || x.url) === vUrl) || vArr?.[0];
+    const aTrack = aPick.track || aArr?.[0];
+    const vAllUrls = getAllUrls(vTrack), aAllUrls = aPick.urls?.length ? aPick.urls : getAllUrls(aTrack);
+
+    const rawTitle = document.title?.replace("_bilibili", "") || "bilibili_video";
+    let vTitle = null;
+    try { vTitle = window.__INITIAL_STATE__?.videoData?.title || window.__INITIAL_STATE__?.h1Title; } catch (_) {}
+    if (!vTitle) { const mt = document.querySelector('meta[property="og:title"]'); if (mt?.content) vTitle = mt.content; }
+    if (!vTitle) { const h1 = document.querySelector("h1"); const t = h1 && (h1.getAttribute("title") || h1.textContent); if (t) vTitle = t; }
+    if (!vTitle) {
+      try { const info = await getBvid(); if (info?.bvid) {
+        const vr = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${info.bvid}`, { credentials: "include" });
+        const vj = await vr.json(); if (vj?.data?.title) vTitle = vj.data.title;
+      }} catch (_) {}
+    }
+    if (vTitle) vTitle = String(vTitle).trim();
+
+    let fname = safeName(vTitle || rawTitle);
+    if (selPage) { const pn = selPage.part || selPage.title || `P${selIdx+1}`; fname = `${fname}_P${selIdx+1}_${safeName(pn)}`; }
+
+    if (!vUrl || !aUrl) { overlay.setStep(T.noTrack); overlay.setDetail(T.noTrackDetail); overlay.done(); return; }
+
+    console.log("[BiliDown] vUrl:", !!vUrl, "aUrl:", !!aUrl, "fname:", fname);
+
+    // Use streaming merge approach
+    try {
+      await streamMerge({ vUrl, aUrl, filename: fname, vAllUrls, aAllUrls });
+    } catch(e) {
+      console.error("[BiliDown] streamMerge error:", e);
+      if (e?.name === 'AbortError' || e?.message === 'Aborted') {
+        overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return;
+      }
+      overlay.setStep(T.errTitle);
+      overlay.setDetail(e?.message || T.dlFail);
+      if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || ""))) {
+        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${fname}.mp4` });
+        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${fname}.m4a` }), 1000);
+      }
+      overlay.done();
+    }
+
+  } catch(err) {
+    console.error("[BilibiliDownloader] Fatal:", err);
+    const el = document.getElementById("bili-download-overlay");
+    if (el) {
+      const d = el.querySelector("div:nth-child(4)");
+      if (d) d.textContent = err?.message || String(err);
+    } else {
+      alert("脚本错误: " + (err?.message || String(err)));
+    }
+  }
+})();

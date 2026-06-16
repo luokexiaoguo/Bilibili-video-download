@@ -19,7 +19,7 @@ const I18N = {
     msgError: "启动失败: "
   },
   en: {
-    popupTitle: "BiliDown - HD Video Downloader",
+    popupTitle: "BiliDown",
     tipsTitle: "💡 Tips",
     tipMerge: "<b>Auto Merge</b>: Best choice. Merges audio & video into MP4 automatically.",
     tipSplit: "<b>Auto Split</b>: If merge fails, tries to download audio/video separately.",
