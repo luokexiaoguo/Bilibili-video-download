@@ -56,3 +56,20 @@ window.addEventListener("BILI_TRIGGER_DOWNLOAD", (e) => {
         }
     }
 });
+
+// Handle FFmpeg file requests from MAIN world (chrome.runtime not available there)
+window.addEventListener("BILI_TRIGGER_FFMPEG", (e) => {
+    const requestId = e.detail?.requestId;
+    try {
+        chrome.runtime.sendMessage({ action: 'GET_FFMPEG' }, (resp) => {
+            if (chrome.runtime.lastError) {
+                window.dispatchEvent(new CustomEvent("BILI_FFMPEG_RESPONSE", { detail: { requestId, success: false, error: chrome.runtime.lastError.message } }));
+                return;
+            }
+            window.dispatchEvent(new CustomEvent("BILI_FFMPEG_RESPONSE", { detail: { requestId, success: resp?.success, files: resp?.files, error: resp?.error, extId: chrome.runtime.id } }));
+        });
+    } catch (err) {
+        console.error("[Bridge] FFmpeg request failed", err);
+        window.dispatchEvent(new CustomEvent("BILI_FFMPEG_RESPONSE", { detail: { requestId, success: false, error: err.message } }));
+    }
+});

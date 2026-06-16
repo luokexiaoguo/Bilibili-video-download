@@ -3,6 +3,9 @@
     console.log("[BilibiliDownloader] Script started");
 
     const lang = window.__BILI_LANG__ || "zh";
+    const preferHDR = window.__BILI_DOWN_PREF__?.preferHDR === true;
+    console.log("[BilibiliDownloader] HDR Preference:", preferHDR ? "HDR" : "SDR");
+
     const T = {
       zh: {
         title: "B站离线舱",
@@ -38,7 +41,8 @@
         audio: "音频",
         noStreamSave: "当前浏览器不支持流式保存",
         selectAudio: "请继续选择音频保存位置...",
-        scriptFail: "脚本启动失败: "
+        scriptFail: "脚本启动失败: ",
+        multiPartDetected: "检测到多P视频，请选择要下载的分P"
       },
       en: {
         title: "BiliDown",
@@ -74,1263 +78,860 @@
         audio: "Audio",
         noStreamSave: "Browser does not support stream save",
         selectAudio: "Select location for AUDIO file...",
-        scriptFail: "Script failed to start: "
+        scriptFail: "Script failed to start: ",
+        multiPartDetected: "Multi-part video detected. Select which part to download."
       }
     }[lang];
 
+    // ============================================================
     // 1. Overlay UI Component
+    // ============================================================
     const overlay = (() => {
-      try {
-        const el = document.createElement("div");
-        el.id = "bili-download-overlay";
-        el.style.position = "fixed";
-        el.style.right = "16px";
-        el.style.bottom = "16px";
-        el.style.zIndex = "2147483647"; // Max Z-Index
-        el.style.background = "rgba(0,0,0,0.85)";
-        el.style.color = "#fff";
-        el.style.font = "14px/1.6 system-ui, -apple-system, Segoe UI, sans-serif";
-        el.style.padding = "16px";
-        el.style.borderRadius = "8px";
-        el.style.boxShadow = "0 4px 12px rgba(0,0,0,0.5)";
-        el.style.minWidth = "260px";
-        el.style.maxWidth = "360px";
-        el.style.userSelect = "none";
-        
-        // Draggable
-        el.style.cursor = "move";
-        let isDragging = false;
-        let startX, startY, initialLeft, initialTop;
-        
-        el.addEventListener("mousedown", (e) => {
-          if (e.target.tagName === "BUTTON" || e.target.style.cursor === "pointer") return;
-          isDragging = true;
-          startX = e.clientX;
-          startY = e.clientY;
-          const rect = el.getBoundingClientRect();
-          initialLeft = rect.left;
-          initialTop = rect.top;
-          el.style.right = "auto";
-          el.style.bottom = "auto";
-          el.style.left = initialLeft + "px";
-          el.style.top = initialTop + "px";
-          e.preventDefault();
-        });
+      const el = document.createElement("div");
+      el.id = "bili-download-overlay";
+      el.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;background:rgba(0,0,0,0.85);color:#fff;font:14px/1.6 system-ui,sans-serif;padding:16px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);min-width:260px;max-width:360px;user-select:none;cursor:move;";
 
-        window.addEventListener("mousemove", (e) => {
-          if (!isDragging) return;
-          el.style.left = (initialLeft + (e.clientX - startX)) + "px";
-          el.style.top = (initialTop + (e.clientY - startY)) + "px";
-        });
+      let isDrag = false, sx, sy, il, it;
+      el.addEventListener("mousedown", e => {
+        if (e.target.tagName === "BUTTON") return;
+        isDrag = true; sx = e.clientX; sy = e.clientY;
+        const r = el.getBoundingClientRect(); il = r.left; it = r.top;
+        el.style.right = "auto"; el.style.bottom = "auto";
+        el.style.left = il + "px"; el.style.top = it + "px";
+        e.preventDefault();
+      });
+      window.addEventListener("mousemove", e => { if (!isDrag) return; el.style.left = (il + e.clientX - sx) + "px"; el.style.top = (it + e.clientY - sy) + "px"; });
+      window.addEventListener("mouseup", () => isDrag = false);
 
-        window.addEventListener("mouseup", () => isDragging = false);
+      const titleDiv = document.createElement("div");
+      titleDiv.style.cssText = "font-weight:bold;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:4px;";
+      titleDiv.textContent = T.title;
+      el.appendChild(titleDiv);
 
-        // UI Elements
-        const titleDiv = document.createElement("div");
-        titleDiv.style.fontWeight = "bold";
-        titleDiv.style.marginBottom = "8px";
-        titleDiv.style.borderBottom = "1px solid rgba(255,255,255,0.2)";
-        titleDiv.style.paddingBottom = "4px";
-        
-        // I18N Handling (Moved to top scope)
+      const stepDiv = document.createElement("div");
+      el.appendChild(stepDiv);
 
-        titleDiv.textContent = T.title;
-        el.appendChild(titleDiv);
+      const barCon = document.createElement("div");
+      barCon.style.cssText = "margin-top:8px;height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden;";
+      const barDiv = document.createElement("div");
+      barDiv.style.cssText = "height:100%;width:0%;background:#00aeec;transition:width 0.2s;";
+      barCon.appendChild(barDiv);
+      el.appendChild(barCon);
 
-        const stepDiv = document.createElement("div");
-        stepDiv.textContent = T.init;
-        el.appendChild(stepDiv);
+      const detailDiv = document.createElement("div");
+      detailDiv.style.cssText = "margin-top:8px;font-size:12px;opacity:0.8;word-break:break-all;";
+      el.appendChild(detailDiv);
 
-        const barContainer = document.createElement("div");
-        barContainer.style.marginTop = "8px";
-        barContainer.style.height = "6px";
-        barContainer.style.background = "rgba(255,255,255,0.2)";
-        barContainer.style.borderRadius = "3px";
-        barContainer.style.overflow = "hidden";
-        
-        const barDiv = document.createElement("div");
-        barDiv.style.height = "100%";
-        barDiv.style.width = "0%";
-        barDiv.style.background = "#00aeec";
-        barDiv.style.transition = "width 0.2s";
-        barContainer.appendChild(barDiv);
-        el.appendChild(barContainer);
+      const btnArea = document.createElement("div");
+      btnArea.style.cssText = "margin-top:12px;display:flex;justify-content:flex-end;gap:10px;";
+      el.appendChild(btnArea);
 
-        const detailDiv = document.createElement("div");
-        detailDiv.style.marginTop = "8px";
-        detailDiv.style.fontSize = "12px";
-        detailDiv.style.opacity = "0.8";
-        detailDiv.style.wordBreak = "break-all";
-        el.appendChild(detailDiv);
-        
-        // Buttons Area
-        const btnArea = document.createElement("div");
-        btnArea.style.marginTop = "12px";
-        btnArea.style.display = "flex";
-        btnArea.style.justifyContent = "flex-end";
-        btnArea.style.gap = "10px";
-        el.appendChild(btnArea);
+      const mkBtn = (txt, color, onClk) => {
+        const b = document.createElement("button");
+        b.textContent = txt;
+        b.style.cssText = "background:transparent;border:none;color:" + color + ";cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
+        b.onclick = onClk;
+        return b;
+      };
 
-        // Helper to create button
-        const createBtn = (text, color, onClick) => {
-            const btn = document.createElement("button");
-            btn.textContent = text;
-            btn.style.background = "transparent";
-            btn.style.border = "none";
-            btn.style.color = color;
-            btn.style.cursor = "pointer";
-            btn.style.fontSize = "12px";
-            btn.style.padding = "0";
-            btn.style.textDecoration = "underline";
-            btn.onclick = onClick;
-            return btn;
-        };
+      const cancelBtn = mkBtn(T.cancel, "#ff6b6b", () => { if (confirm(T.confirmCancel)) { controller.abort(); el.remove(); } });
+      btnArea.appendChild(cancelBtn);
+      document.body.appendChild(el);
 
-        const cancelBtn = createBtn(T.cancel, "#ff6b6b", () => {
-            if (confirm(T.confirmCancel)) {
-                controller.abort();
-                el.remove();
-            }
-        });
-        btnArea.appendChild(cancelBtn);
-
-        document.body.appendChild(el);
-        
-        const updateStatus = (data) => {
-            try { window.dispatchEvent(new CustomEvent("BILI_DOWN_STATUS", { detail: data })); } catch(_) {}
-        };
-
-        return {
-          setStep: (t) => { 
-              stepDiv.textContent = t; 
-              updateStatus({ step: t }); 
-          },
-          setProgress: (p) => { 
-              barDiv.style.width = Math.max(0, Math.min(100, p)) + "%";
-              updateStatus({ progress: Math.round(p) }); 
-          },
-          setDetail: (t) => { 
-              detailDiv.textContent = t; 
-              updateStatus({ detail: t });
-          },
-          addBtn: (text, onClick) => {
-             const btn = createBtn(text, "#4cc9f0", onClick);
-             btn.style.marginRight = "8px";
-             btn.style.textDecoration = "none";
-             btn.style.background = "rgba(255,255,255,0.1)";
-             btn.style.padding = "2px 8px";
-             btn.style.borderRadius = "4px";
-             btnArea.insertBefore(btn, cancelBtn);
-             return btn;
-          },
-          done: () => {
-             cancelBtn.textContent = T.close;
-             cancelBtn.style.color = "#fff";
-             cancelBtn.style.textDecoration = "none";
-             // Remove onclick event to prevent accidental download cancellation when closing the completed dialog
-             cancelBtn.onclick = () => el.remove();
-             updateStatus({ done: true });
-          },
-          // Expose resetCancelBtn to restore the cancel button state
-          resetCancelBtn: () => {
-             cancelBtn.textContent = T.cancel;
-             cancelBtn.style.color = "#ff6b6b";
-             cancelBtn.style.textDecoration = "underline";
-             cancelBtn.onclick = () => {
-                if (confirm(T.confirmCancel)) {
-                    controller.abort();
-                    el.remove();
-                }
-             };
-          },
-          remove: () => {
-              el.remove();
-              updateStatus({ done: true });
-          }
-        };
-      } catch (e) {
-        alert("UI Init Failed / UI初始化失败: " + e.message);
-        throw e;
-      }
+      return {
+        setStep: t => { stepDiv.textContent = t; },
+        setProgress: p => { barDiv.style.width = Math.max(0, Math.min(100, p)) + "%"; },
+        setDetail: t => { detailDiv.textContent = t; },
+        addBtn: (txt, onClk) => {
+          const b = mkBtn(txt, "#4cc9f0", onClk);
+          b.style.cssText = "margin-right:8px;text-decoration:none;background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:4px;";
+          btnArea.insertBefore(b, cancelBtn);
+          return b;
+        },
+        done: () => {
+          cancelBtn.textContent = T.close;
+          cancelBtn.style.cssText = "background:transparent;border:none;color:#fff;cursor:pointer;font-size:12px;padding:0;text-decoration:none;";
+          cancelBtn.onclick = () => el.remove();
+        },
+        resetCancel: () => {
+          cancelBtn.textContent = T.cancel;
+          cancelBtn.style.cssText = "background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
+          cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); el.remove(); } };
+        },
+        remove: () => el.remove()
+      };
     })();
 
-    // Listen for custom event from overlay to sync status to storage for popup
-    window.addEventListener("BILI_DOWN_STATUS", (e) => {
-        if (e.detail) {
-            // We need to send this to background or save to storage directly?
-            // Content script cannot access chrome.storage directly in MAIN world?
-            // Wait, this script is injected as MAIN world.
-            // MAIN world cannot access chrome.runtime or chrome.storage.
-            // So we need to dispatch event to ISOLATED world bridge.
-            window.dispatchEvent(new CustomEvent("BILI_BRIDGE_STATUS_UPDATE", { detail: e.detail }));
-        }
-    });
+    window.addEventListener("BILI_DOWN_STATUS", e => { if (e.detail) window.dispatchEvent(new CustomEvent("BILI_BRIDGE_STATUS_UPDATE", { detail: e.detail })); });
 
-    // Global abort controller
     const controller = new AbortController();
     const signal = controller.signal;
 
-    // Utils
-    const fetchWithTimeout = async (resource, options = {}) => {
-      const { timeout = 8000 } = options;
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-      try {
-        const response = await fetch(resource, {
-          ...options,
-          signal: controller.signal
-        });
-        clearTimeout(id);
-        return response;
-      } catch (error) {
-        clearTimeout(id);
-        throw error;
-      }
+    // ============================================================
+    // 2. Utilities
+    // ============================================================
+    const fetchWithTimeout = async (url, opts = {}) => {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), opts.timeout || 8000);
+      try { const r = await fetch(url, { ...opts, signal: ctrl.signal }); clearTimeout(id); return r; }
+      catch (e) { clearTimeout(id); throw e; }
     };
 
-    const fmtBytes = (n) => {
+    const fmtBytes = n => {
       if (!n && n !== 0) return "";
-      const u = ["B","KB","MB","GB"]; let i = 0; let v = n;
+      const u = ["B","KB","MB","GB"]; let i = 0, v = n;
       while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
       return v.toFixed(1) + " " + u[i];
     };
-    const fmtTime = (s) => {
-      s = Math.max(0, Math.floor(s));
-      const m = Math.floor(s / 60); const ss = s % 60;
-      return (m > 0 ? m + "m " : "") + ss + "s";
+
+    // ============================================================
+    // 3. Multi-Part Selector
+    // ============================================================
+    const getMultiPartInfo = () => {
+      try {
+        const st = window.__INITIAL_STATE__ || {};
+        const pages = (st.videoData || {}).pages || (st.metadata || {}).list || [];
+        if (pages.length > 1) {
+          const p = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
+          return { pages, currentIndex: Math.min(p, pages.length - 1) };
+        }
+      } catch (_) {}
+      return null;
     };
 
-    // 2. Bilibili Resolver
-    const getBvid = async () => {
-      // 1. Try URL (video)
-      const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
-      if (m) return { bvid: m[1], cid: null };
-      
-      // 2. Try URL (bangumi ep)
-      const epMatch = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
-      if (epMatch) {
-        const epId = epMatch[1];
-        try {
-          const res = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epId}`);
-          const json = await res.json();
-          // Debug log
-          console.log("Bangumi EP Info:", json);
-          const episodes = json?.result?.episodes || [];
-          const targetEp = episodes.find(e => e.id == epId);
-          if (targetEp && targetEp.bvid) return { bvid: targetEp.bvid, cid: targetEp.cid, epId: epId };
-          // If not found in episodes list (sometimes sections?), fallback to result.bvid if available?
-          // But result usually has main section bvid.
-        } catch (_) {}
-      }
+    const showPartSelector = (pages, currentIndex) => {
+      return new Promise(resolve => {
+        const c = document.createElement("div");
+        c.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2147483647;display:flex;align-items:center;justify-content:center;";
+        const box = document.createElement("div");
+        box.style.cssText = "background:#1f1f1f;color:#fff;padding:24px;border-radius:12px;min-width:320px;max-width:480px;max-height:80vh;overflow:auto;font-family:system-ui,sans-serif;";
+        const t = document.createElement("h3");
+        t.textContent = T.multiPartDetected;
+        t.style.cssText = "margin:0 0 16px 0;color:#FB7299;";
+        box.appendChild(t);
+        const list = document.createElement("div");
+        list.style.cssText = "max-height:400px;overflow-y:auto;";
+        pages.forEach((p, i) => {
+          const n = p.part || p.title || `P${i+1}`;
+          const b = document.createElement("button");
+          b.textContent = `${i+1}. ${n}`;
+          b.style.cssText = `display:block;width:100%;padding:10px 12px;margin-bottom:8px;background:${i===currentIndex?'#FB7299':'#2d2d2d'};color:#fff;border:none;border-radius:6px;text-align:left;cursor:pointer;font-size:13px;font-weight:${i===currentIndex?'bold':'normal'};`;
+          b.onclick = () => { c.remove(); resolve({ index: i, page: p }); };
+          list.appendChild(b);
+        });
+        const cb = document.createElement("button");
+        cb.textContent = T.cancel;
+        cb.style.cssText = "display:block;width:100%;padding:8px 16px;margin-top:8px;background:transparent;border:1px solid #666;color:#aaa;border-radius:6px;cursor:pointer;";
+        cb.onclick = () => { c.remove(); resolve(null); };
+        box.appendChild(list); box.appendChild(cb); c.appendChild(box); document.body.appendChild(c);
+      });
+    };
 
-      // 3. Try URL (bangumi ss)
-      const ssMatch = location.pathname.match(/\/bangumi\/play\/ss(\d+)/i);
-      if (ssMatch) {
-        const seasonId = ssMatch[1];
-        try {
-          const res = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`);
-          const json = await res.json();
-          console.log("Bangumi SS Info:", json);
-          if (json?.result?.episodes?.length > 0) {
-             // Find the first episode or currently active? 
-             // Without ep_id in URL, it usually defaults to first or history.
-             // We just take the first one for now as a fallback.
-             const ep = json.result.episodes[0];
-             return { bvid: ep.bvid, cid: ep.cid, epId: ep.id };
-          }
-        } catch (_) {}
-      }
-
-      // 4. Try Global State
+    // ============================================================
+    // 4. Bilibili API
+    // ============================================================
+    
+    // 获取当前视频的 cid，优先使用最新的播放器数据
+    const getCurrentVideoCid = () => {
+      // 方法1: 从 __playinfo_state__ 获取（播放器切换时的实时数据）
       try {
-        if (window.__INITIAL_STATE__) {
-           const s = window.__INITIAL_STATE__;
-           if (s.bvid) return { bvid: s.bvid, cid: s.cid };
-           if (s.epInfo && s.epInfo.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: s.epInfo.id };
-           if (s.videoData && s.videoData.bvid) return { bvid: s.videoData.bvid, cid: s.videoData.cid };
+        const pis = window.__playinfo_state__ || window.playinfo_state;
+        if (pis?.cid) return { cid: String(pis.cid), source: 'playinfo_state' };
+        if (pis?.videoData?.cid) return { cid: String(pis.videoData.cid), source: 'playinfo_state.videoData' };
+      } catch (_) {}
+      
+      // 方法2: 从 __playinfo__ 获取（页面嵌入的数据）
+      try {
+        const pi = window.__playinfo__ || window.playinfo;
+        if (pi?.cid) return { cid: String(pi.cid), source: 'playinfo' };
+        if (pi?.data?.cid) return { cid: String(pi.data.cid), source: 'playinfo.data' };
+      } catch (_) {}
+      
+      // 方法3: 从 DOM 中提取 window.__playinfo__
+      try {
+        const m = document.body.innerHTML.match(/window\.__playinfo__\s*=\s*({.*?})(?:;|\n)/);
+        if (m) { const d = JSON.parse(m[1]); if (d.cid) return { cid: String(d.cid), source: 'dom_playinfo' }; if (d.data?.cid) return { cid: String(d.data.cid), source: 'dom_playinfo.data' }; }
+      } catch (_) {}
+      
+      // 方法4: 从 player 元素获取 cid
+      try {
+        const player = document.querySelector('#player_module, .bpx-player-container, #bilibili-player');
+        if (player) {
+          const cid = player.getAttribute('data-cid') || player.dataset?.cid;
+          if (cid) return { cid: String(cid), source: 'player_element' };
         }
+      } catch (_) {}
+      
+      // 方法5: 从 __INITIAL_STATE__ 获取（兜底）
+      try {
+        const st = window.__INITIAL_STATE__ || {};
+        if (st.cid) return { cid: String(st.cid), source: 'initial_state' };
+        if (st.videoData?.cid) return { cid: String(st.videoData.cid), source: 'initial_state.videoData' };
       } catch (_) {}
       
       return null;
     };
 
-    async function resolveBilibili() {
-      // Priority 1: Window Objects
-      const p = window.__playinfo__ || window.playinfo;
-      if (p && p.dash) return p.dash;
-      
-      // Priority 2: HTML Scraping (if window object missing)
-      try {
-          const html = document.body.innerHTML;
-          const m = html.match(/window\.__playinfo__=({.*?})/);
-          if (m) {
-              const data = JSON.parse(m[1]);
-              if (data && data.data && data.data.dash) return data.data.dash;
-          }
-      } catch(_) {}
-
-      // Priority 3: API Fetch
-      const info = await getBvid();
-      if (!info || !info.bvid) return null;
-      
-      const { bvid, epId } = info;
-      let { cid } = info;
-
-      try {
-        if (!cid) {
-            const viewRes = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
-            const viewJson = await viewRes.json();
-            const vd = viewJson?.data || {};
-            cid = vd.cid || (vd.pages && vd.pages[0] && vd.pages[0].cid) || 0;
-        }
-        
-        if (!cid) return null;
-
-        // Try UGC API
-        let playRes = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
-        let playJson = await playRes.json();
-        let data = playJson?.data || {};
-        
-        // Try PGC API
-        if (!data.dash) {
-             let pgcUrl = `https://api.bilibili.com/pgc/player/web/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`;
-             if (epId) pgcUrl += `&ep_id=${epId}`;
-             
-             playRes = await fetchWithTimeout(pgcUrl, { credentials: "include" });
-             playJson = await playRes.json();
-             data = playJson?.result || {};
-        }
-
-        if (data.dash) return data.dash;
-        return null;
-      } catch (e) {
-        console.warn("Resolve Bilibili Error", e);
-        return null;
+    const getBvid = async () => {
+      const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
+      if (m) {
+        const pi = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
+        let pc = null, pt = null;
+        try {
+          const pg = (window.__INITIAL_STATE__?.videoData || {}).pages || [];
+          if (pg[pi]) { pc = pg[pi].cid; pt = pg[pi].part || pg[pi].title; }
+        } catch (_) {}
+        return { bvid: m[1], cid: pc, pageIndex: pi, pageTitle: pt };
       }
-    }
 
-    const pickBest = (arr) => {
-      if (!arr || arr.length === 0) return null;
-      // Sort by ID (quality) descending
-      arr.sort((a, b) => (b.id || 0) - (a.id || 0));
-      // Pick highest quality group
-      const maxId = arr[0].id;
-      const candidates = arr.filter(x => x.id === maxId);
-      // Sort by bandwidth descending
-      candidates.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0));
-      const best = candidates[0];
-      return best.baseUrl || best.base_url || best.url || (best.backupUrl && best.backupUrl[0]);
+      const ep = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
+      if (ep) {
+        const eid = ep[1];
+        try {
+          if (window.__INITIAL_STATE__) {
+            const s = window.__INITIAL_STATE__;
+            if (s.epInfo?.id == eid && s.epInfo.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: eid };
+            const f = (s.epList || []).find(e => e.id == eid);
+            if (f?.bvid) return { bvid: f.bvid, cid: f.cid, epId: eid };
+          }
+        } catch (_) {}
+        try {
+          const r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?ep_id=${eid}`);
+          const j = await r.json();
+          const eps = (j?.result || {}).episodes || [];
+          let t = eps.find(e => e.id == eid);
+          if (!t && j?.result?.sections) for (const s of j.result.sections) { t = s.episodes?.find(e => e.id == eid); if (t) break; }
+          if (t?.bvid) return { bvid: t.bvid, cid: t.cid, epId: eid };
+        } catch (_) {}
+      }
+
+      // 付费课程/cheese
+      const cheese = location.pathname.match(/\/cheese\/play\/ep(\d+)/i);
+      if (cheese) {
+        const eid = cheese[1];
+        try {
+          const st = window.__INITIAL_STATE__ || {};
+          if (st.epInfo?.bvid) return { bvid: st.epInfo.bvid, cid: st.epInfo.cid, epId: eid, isCheese: true };
+          if (st.videoData?.bvid) return { bvid: st.videoData.bvid, cid: st.videoData.cid, epId: eid, isCheese: true };
+        } catch (_) {}
+        try {
+          const r = await fetchWithTimeout(`https://api.bilibili.com/p/web/view/view?ep_id=${eid}`, { credentials: "include" });
+          const j = await r.json();
+          if (j?.data?.bvid) return { bvid: j.data.bvid, cid: j.data.cid, epId: eid, isCheese: true };
+        } catch (_) {}
+      }
+
+      const ss = location.pathname.match(/\/bangumi\/play\/ss(\d+)/i);
+      if (ss) {
+        const sid = ss[1];
+        try {
+          if (window.__INITIAL_STATE__) {
+            const s = window.__INITIAL_STATE__;
+            if (s.epInfo?.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: s.epInfo.id };
+            if (s.epList?.length > 0) return { bvid: s.epList[0].bvid, cid: s.epList[0].cid, epId: s.epList[0].id };
+          }
+        } catch (_) {}
+        try {
+          const r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${sid}`);
+          const j = await r.json();
+          const eps = (j?.result || {}).episodes || [];
+          if (eps[0]) return { bvid: eps[0].bvid, cid: eps[0].cid, epId: eps[0].id };
+        } catch (_) {}
+      }
+
+      try {
+        const s = window.__INITIAL_STATE__ || {};
+        if (s.bvid) return { bvid: s.bvid, cid: s.cid };
+        if (s.epInfo?.bvid) return { bvid: s.epInfo.bvid, cid: s.epInfo.cid, epId: s.epInfo.id };
+        if (s.videoData?.bvid) return { bvid: s.videoData.bvid, cid: s.videoData.cid };
+      } catch (_) {}
+      return null;
     };
 
-    const isHdrOrDolbyVideo = (x) => {
+    async function resolveBilibili(specificCid) {
+      // 如果用户明确指定了 cid（分P选择器），优先使用，跳过自动检测
+      const currentCid = specificCid ? null : getCurrentVideoCid();
+      if (currentCid) {
+        console.log('[BiliDown] Found current cid from:', currentCid.source, currentCid.cid);
+        // 如果播放器有实时 cid，优先使用它来获取 dash
+        const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
+        if (m) {
+          const bvid = m[1];
+          try {
+            const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${currentCid.cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
+            const pj = await pr.json();
+            if (pj?.data?.dash) {
+              console.log('[BiliDown] Using real-time cid:', currentCid.cid);
+              return pj.data.dash;
+            }
+          } catch (_) {}
+        }
+        
+        // 番剧使用 ep_id 方式
+        const ep = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
+        if (ep) {
+          try {
+            const u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1&cid=${currentCid.cid}&ep_id=${ep[1]}`;
+            const pr = await fetchWithTimeout(u, { credentials: "include" });
+            const pj = await pr.json();
+            if (pj?.result?.dash || pj?.data?.dash) {
+              console.log('[BiliDown] Using real-time cid for bangumi:', currentCid.cid);
+              return pj.result.dash || pj.data.dash;
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 回退：尝试从页面嵌入的 __playinfo__ 获取 dash（最可靠）
+      // 注意：分P选择器指定了 specificCid 时，__playinfo__ 可能是初始页面的数据，不能直接用
+      if (!specificCid) {
+        const p = window.__playinfo__ || window.playinfo;
+        if (p?.dash) return p.dash;
+
+        try {
+          const m = document.body.innerHTML.match(/window\.__playinfo__\s*=\s*({.*?})(?:;|\n)/);
+          if (m) { const d = JSON.parse(m[1]); if (d.dash || d.data?.dash) return d.dash || d.data.dash; }
+        } catch (_) {}
+      }
+
+      // 最后回退：使用 getBvid 获取 bvid/cid 然后请求 API
+      const info = await getBvid();
+      if (!info) return null;
+      const { bvid, epId } = info;
+      let cid = specificCid || info.cid;
+
+      if (!cid && bvid) {
+        const vr = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
+        const vj = await vr.json();
+        const vd = vj?.data || {};
+        if (!specificCid && vd.pages?.length > 0) {
+          const pi = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
+          cid = vd.pages[pi]?.cid || vd.cid || vd.pages[0]?.cid || 0;
+        } else cid = vd.cid || vd.pages?.[0]?.cid || 0;
+      }
+      if (!cid && !epId) return null;
+
+      let dash = null;
+      if (bvid && cid) {
+        try {
+          const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
+          const pj = await pr.json();
+          if (pj?.data?.dash) dash = pj.data.dash;
+        } catch (_) {}
+      }
+      if (!dash && (epId || (bvid && cid))) {
+        let u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1`;
+        if (epId) u += `&ep_id=${epId}`; else u += `&cid=${cid}&bvid=${bvid}`;
+        try { const pr = await fetchWithTimeout(u, { credentials: "include" }); const pj = await pr.json(); if (pj?.result?.dash || pj?.data?.dash) dash = pj.result.dash || pj.data.dash; } catch (_) {}
+      }
+      // cheese 课程专用 API
+      if (!dash && info?.isCheese && bvid && cid) {
+        try {
+          const u = `https://api.bilibili.com/p/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`;
+          const pr = await fetchWithTimeout(u, { credentials: "include" });
+          const pj = await pr.json();
+          if (pj?.data?.dash) dash = pj.data.dash;
+        } catch (_) {}
+      }
+      return dash;
+    }
+
+    // ============================================================
+    // 5. Track Selection
+    // ============================================================
+    const getAllUrls = t => {
+      if (!t) return [];
+      const o = [];
+      const p = u => { if (u && !o.includes(u)) o.push(u); };
+      p(t.baseUrl || t.base_url || t.url);
+      if (Array.isArray(t.backupUrl || t.backup_url)) for (const u of t.backupUrl || t.backup_url) p(u);
+      return o;
+    };
+
+    const isHdr = x => {
       if (!x) return false;
-      const id = Number(x.id);
-      if (id === 125 || id === 126) return true;
+      const id = Number(x.id || x.codecid || x.codecId || 0);
+      if (id === 125 || id === 126 || id === 127) return true;
       const cs = String(x.color_space || x.colorSpace || "");
       if (/2020|bt2020/i.test(cs)) return true;
       if (/709|bt709/i.test(cs)) return false;
-      const tc = x.transfer_characteristics ?? x.transferCharacteristics ?? x.trc ?? x.transfer;
-      if (tc === 16 || tc === 18) return true;
+      const tc = x.transfer_characteristics ?? x.transferCharacteristics ?? x.trc ?? x.transfer ?? x.hdr_type ?? x.hdrType ?? 0;
+      if (Number(tc) === 16 || Number(tc) === 18) return true;
       const sig = JSON.stringify({
-        codecs: x.codecs,
-        mimeType: x.mimeType,
-        frameRate: x.frame_rate || x.frameRate,
+        codecs: x.codecs, mimeType: x.mimeType, frameRate: x.frame_rate || x.frameRate,
         hdr: x.hdr || x.hdr_type || x.hdrType,
         dovi: x.dovi || x.dolby_vision || x.dolbyVision,
-        color: x.color_space || x.colorSpace || x.color_primaries || x.colorPrimaries || x.transfer_characteristics || x.transferCharacteristics || x.matrix_coefficients || x.matrixCoefficients
+        color: cs || x.color_primaries || x.colorPrimaries || x.matrix_coefficients || x.matrixCoefficients
       });
       return /dolby|vision|dovi|dvhe|dvh1|hdr|hlg|pq|smpte2084|arib-std-b67|bt2020/i.test(sig);
     };
 
-    const pickBestVideoUrl = (arr) => {
-      if (!arr || arr.length === 0) return null;
-      const nonDrm = arr.filter((x) => {
-        const v = x && (x.drm_tech_type ?? x.drmTechType ?? x.is_drm ?? x.isDrm);
-        return !(Number(v) > 0 || v === true);
-      });
+    const pickBestVideo = (arr, wantHdr) => {
+      if (!arr?.length) return null;
+      const nonDrm = arr.filter(x => { const v = x && (x.drm_tech_type ?? x.drmTechType ?? x.is_drm ?? x.isDrm); return !(Number(v) > 0 || v === true); });
       const pool = nonDrm.length ? nonDrm : arr;
-      const sdrPool = pool.filter((x) => !isHdrOrDolbyVideo(x));
-      const finalPool = sdrPool.length ? sdrPool : pool;
-      if (!finalPool.length) return null;
-
-      const isHevc = (x) => {
-        const c = String(x.codecs || "");
-        return x.codecid === 12 || /hev1|hvc1/i.test(c);
-      };
-      const isAvc = (x) => {
-        const c = String(x.codecs || "");
-        return x.codecid === 7 || /avc1/i.test(c);
-      };
-      const isAv1 = (x) => {
-        const c = String(x.codecs || "");
-        return x.codecid === 13 || /av01/i.test(c);
-      };
-
-      const hevc = finalPool.filter(isHevc);
-      if (hevc.length) return pickBest(hevc);
-      if (sdrPool.length) {
-        const anyHevc = pool.filter(isHevc);
-        if (anyHevc.length) return pickBest(anyHevc);
+      const sdr = pool.filter(x => !isHdr(x)), hdr = pool.filter(x => isHdr(x));
+      // Use HDR/SDR pools if isHdr can distinguish; otherwise fall back to SDR pool then full pool
+      let target = (hdr.length > 0 && sdr.length > 0) ? (wantHdr ? hdr : sdr) : (sdr.length ? sdr : pool);
+      console.log('[pickVideo] wantHdr:', wantHdr, '| SDR:', sdr.length, '| HDR:', hdr.length, '| pool:', target.length);
+      const isHevc = x => x.codecid === 12 || /hev1|hvc1/i.test(String(x.codecs || ""));
+      const isAvc = x => x.codecid === 7 || /avc1/i.test(String(x.codecs || ""));
+      const isAv1 = x => x.codecid === 13 || /av01/i.test(String(x.codecs || ""));
+      for (const arr of [target.filter(isHevc), target.filter(isAvc), target.filter(isAv1)]) {
+        if (arr.length) {
+          arr.sort((a,b) => (b.bandwidth||0)-(a.bandwidth||0));
+          const chosen = arr[0];
+          console.log('[pickVideo] Selected:', chosen.codecs, 'bw=', chosen.bandwidth);
+          return chosen.baseUrl || chosen.base_url || chosen.url;
+        }
       }
-
-      const avc = finalPool.filter(isAvc);
-      if (avc.length) return pickBest(avc);
-
-      const av1 = finalPool.filter(isAv1);
-      if (av1.length) return pickBest(av1);
-
-      return pickBest(finalPool);
+      target.sort((a,b) => (b.bandwidth||0)-(a.bandwidth||0));
+      return target[0]?.baseUrl || target[0]?.base_url || target[0]?.url;
     };
 
-    const getAllUrls = (track) => {
-      if (!track) return [];
-      const out = [];
-      const push = (u) => { if (u && !out.includes(u)) out.push(u); };
-      push(track.baseUrl || track.base_url || track.url);
-      const b = track.backupUrl || track.backup_url;
-      if (Array.isArray(b)) for (const u of b) push(u);
-      return out;
-    };
-
-    const getVideoUrlCandidates = (arr) => {
-      if (!arr || arr.length === 0) return [];
-      const byId = new Map();
+    const pickBestAudio = arr => {
+      if (!arr?.length) return { url: null, track: null, urls: [] };
+      let best = null, urls = [];
       for (const t of arr) {
-        const id = t && t.id != null ? Number(t.id) : 0;
-        if (!byId.has(id)) byId.set(id, []);
-        byId.get(id).push(t);
+        const id = Number(t?.id)||0, bw = Number(t?.bandwidth)||0;
+        const u0 = t && (t.baseUrl || t.base_url || t.url);
+        if (!best || id > best.id || (id === best.id && bw > best.bw)) best = { id, bw, track: t, url: u0 };
+        for (const u of getAllUrls(t)) if (u && !urls.includes(u)) urls.push(u);
       }
-
-      const ids = Array.from(byId.keys()).sort((a, b) => b - a);
-      const out = [];
-      for (const id of ids) {
-        const tracksAll = byId.get(id) || [];
-        const tracksNonDrm = tracksAll.filter((t) => {
-          const v = t && (t.drm_tech_type ?? t.drmTechType ?? t.is_drm ?? t.isDrm);
-          return !(Number(v) > 0 || v === true);
-        });
-        const baseTracks = tracksNonDrm.length ? tracksNonDrm : tracksAll;
-        const tracksNoHdr = baseTracks.filter((t) => !isHdrOrDolbyVideo(t));
-        const tracks = tracksNoHdr.length ? tracksNoHdr : baseTracks;
-        if (!tracks.length) continue;
-        tracks.sort((a, b) => {
-          const aCodecs = String((a && a.codecs) || "");
-          const bCodecs = String((b && b.codecs) || "");
-          const aHevc = (a && (a.codecid === 12 || /hev1|hvc1/i.test(aCodecs))) ? 1 : 0;
-          const bHevc = (b && (b.codecid === 12 || /hev1|hvc1/i.test(bCodecs))) ? 1 : 0;
-          if (bHevc !== aHevc) return bHevc - aHevc;
-          const aAvc = (a && (a.codecid === 7 || /avc1/i.test(aCodecs))) ? 1 : 0;
-          const bAvc = (b && (b.codecid === 7 || /avc1/i.test(bCodecs))) ? 1 : 0;
-          if (bAvc !== aAvc) return bAvc - aAvc;
-          return (Number(b.bandwidth) || 0) - (Number(a.bandwidth) || 0);
-        });
-        for (const t of tracks) {
-          for (const u of getAllUrls(t)) {
-            if (!out.includes(u)) out.push(u);
-          }
-        }
-      }
-      return out;
+      return { url: best?.url, track: best?.track, urls };
     };
 
-    const pickBestAudio = (arr) => {
-      if (!arr || arr.length === 0) return { url: null, track: null, urls: [] };
-      let best = null;
-      const urls = [];
-      for (const t of arr) {
-        const id = Number(t && t.id) || 0;
-        const bw = Number(t && t.bandwidth) || 0;
-        const u0 = (t && (t.baseUrl || t.base_url || t.url)) || null;
-        if (!best) best = { id, bw, track: t, url: u0 };
-        else if (id > best.id || (id === best.id && bw > best.bw)) best = { id, bw, track: t, url: u0 };
-        for (const u of getAllUrls(t)) {
-          if (u && !urls.includes(u)) urls.push(u);
-        }
-      }
-      return { url: best ? best.url : null, track: best ? best.track : null, urls };
+    const safeName = n => {
+      if (!n) return "bilibili_video";
+      let s = String(n);
+      try { s = s.normalize('NFKC'); } catch (_) {}
+      s = s.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "").replace(/[\u0000-\u001F\u007F]/g, "").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+      return s || "bilibili_video";
     };
 
-    const getAudioUrlCandidates = (arr) => {
-      return pickBestAudio(arr).urls;
-    };
-
-    // Helper to format filename properly
-    const getSafeFilename = (name) => {
-        if (!name) return "bilibili_video";
-        let s = String(name);
-        try { s = s.normalize('NFKC'); } catch (_) {}
-        s = s.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, "");
-        s = s.replace(/[\u0000-\u001F\u007F]/g, "");
-        s = s.replace(/[\\/:*?\"<>|]/g, "_");
-        s = s.replace(/\s+/g, " ").trim();
-        s = s.replace(/[. ]+$/g, "");
-        return s || "bilibili_video";
-    };
-
-    // 3. Logic Start
-    overlay.setStep(T.parse);
-    
-    // Add a race with timeout for the whole resolution process
-    const resolvePromise = resolveBilibili();
-    const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout")), 10000)
-    );
-    
-    let dash = null;
-    try {
-        dash = await Promise.race([resolvePromise, timeoutPromise]);
-    } catch (e) {
-        overlay.setStep(T.parseErr);
-        overlay.setDetail(e.message);
-        overlay.done(); // Allow close
-        return;
-    }
-
-    if (!dash) {
-      overlay.setStep(T.noInfo);
-      overlay.setDetail(T.noInfoDetail);
-      overlay.done();
-      setTimeout(() => overlay.remove(), 6000);
-      return;
-    }
-
-    const vTrackArr = dash.video;
-    const aTrackArr = dash.audio;
-    const vUrl = pickBestVideoUrl(vTrackArr);
-    const aPick = pickBestAudio(aTrackArr);
-    const aUrl = aPick.url;
-    const vTrack =
-      (vTrackArr || []).find((x) => (x.baseUrl || x.base_url || x.url) === vUrl) ||
-      (vTrackArr && vTrackArr[0]) ||
-      null;
-    const aTrack = aPick.track || (aTrackArr && aTrackArr[0]) || null;
-    // Use getSafeFilename here to ensure consistency
-    const rawTitle = document.title ? document.title.replace("_bilibili", "") : "bilibili_video";
-    let videoTitle = null;
-    try {
-      videoTitle = window.__INITIAL_STATE__?.videoData?.title || window.__INITIAL_STATE__?.h1Title || null;
-    } catch (_) {}
-    if (!videoTitle) {
-      const metaTitle = document.querySelector('meta[property="og:title"]');
-      if (metaTitle?.content) videoTitle = metaTitle.content;
-    }
-    if (!videoTitle) {
-      const h1 = document.querySelector("h1");
-      const t = h1 && (h1.getAttribute("title") || h1.textContent);
-      if (t) videoTitle = t;
-    }
-    if (!videoTitle) {
-      try {
-        const info = await getBvid();
-        if (info?.bvid) {
-          const viewRes = await fetchWithTimeout(
-            `https://api.bilibili.com/x/web-interface/view?bvid=${info.bvid}`,
-            { credentials: "include" }
-          );
-          const viewJson = await viewRes.json();
-          const t = viewJson?.data?.title;
-          if (t) videoTitle = t;
-        }
-      } catch (_) {}
-    }
-    if (videoTitle) videoTitle = String(videoTitle).trim();
-    const filename = getSafeFilename(videoTitle || rawTitle);
-    const aAllUrls = Array.isArray(aPick.urls) && aPick.urls.length ? aPick.urls : getAllUrls(aTrack);
-
-    if (!vUrl || !aUrl) {
-      overlay.setStep(T.noTrack);
-      if (!vUrl && vTrackArr && vTrackArr.length) {
-        overlay.setDetail(T.noTrackDetail + " (HDR/Dolby excluded)");
-      } else {
-        overlay.setDetail(T.noTrackDetail);
-      }
-      overlay.done();
-      return;
-    }
-
-    // 4. Download Helpers
-    const triggerBgDownload = (payload) => {
-        // Update overlay to show we are handing off to browser
-        overlay.setStep(T.browserDl);
-        overlay.setProgress(100);
-        overlay.setDetail(T.browserDlDetail);
-        overlay.done();
-        
-        // Dispatch event to content_bridge.js (ISOLATED world)
-        // which has access to chrome.runtime
-        window.dispatchEvent(new CustomEvent("BILI_TRIGGER_DOWNLOAD", { 
-            detail: payload
-        }));
-    };
-
-    const streamToFile = async ({ urls, suggestedName, label, progressBase, progressScale, handle: providedHandle }) => {
+    // ============================================================
+    // 6. Streaming Download (single file handle, progress tracking)
+    // ============================================================
+    const streamDownload = async ({ url, filename, onProgress }) => {
       if (!window.showSaveFilePicker) throw new Error(T.noStreamSave);
-      
-      let handle = providedHandle;
-      if (!handle) {
-          handle = await window.showSaveFilePicker({ suggestedName });
-      }
-      
-      const list = Array.isArray(urls) ? urls : (urls ? [urls] : []);
+      const handle = await window.showSaveFilePicker({ suggestedName: filename });
+      let writable;
+      try { writable = await handle.createWritable({ keepExistingData: false }); }
+      catch (_) { writable = await handle.createWritable(); }
 
-      for (const url of list) {
-        if (!url) continue;
-        let writable;
-        try {
-          try {
-            writable = await handle.createWritable({ keepExistingData: false });
-          } catch (_) {
-            writable = await handle.createWritable();
-          }
-          const doFetch = (ref) => fetch(url, {
-            credentials: "omit",
-            referrer: ref,
-            referrerPolicy: "no-referrer-when-downgrade",
-            signal
-          });
-          let res = await doFetch(location.href);
-          if (res && res.status === 403) res = await doFetch("https://www.bilibili.com/");
-          if (!res.ok || !res.body) {
-            try { await writable.abort(); } catch (_) {}
-            continue;
-          }
-
-          const total = Number(res.headers.get("content-length")) || 0;
-          const reader = res.body.getReader();
-          let loaded = 0;
-          const start = performance.now();
-          let lastUiUpdate = 0;
-
-          // Don't update step title here, as it might overwrite "Downloading Video" with "Saving Audio" too early
-          // overlay.setStep(`${T.saving}${label}...`); 
-          
-          while (true) {
-            // Check abort signal
-            if (signal.aborted) throw new Error("Aborted");
-            
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            // Check abort signal again
-            if (signal.aborted) throw new Error("Aborted");
-            
-            await writable.write(value);
-            loaded += value.length;
-            
-            const now = performance.now();
-            if (now - lastUiUpdate > 200) { // Throttle UI update to every 200ms
-                lastUiUpdate = now;
-                if (total) {
-                  const p = (loaded / total) * 100;
-                  overlay.setProgress(progressBase + p * progressScale);
-                  const elapsed = (now - start) / 1000;
-                  const speed = loaded / Math.max(0.1, elapsed);
-                  overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
-                } else {
-                  overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
-                }
-            }
-          }
-          
-          // Final update to ensure 100% or final size is shown
-          if (total) {
-              overlay.setProgress(progressBase + 100 * progressScale);
-              const elapsed = (performance.now() - start) / 1000;
-              const speed = loaded / Math.max(0.1, elapsed);
-              overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
-          } else {
-              overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
-          }
-
-          if (loaded <= 0) {
-            try { await writable.abort(); } catch (_) {}
-            continue;
-          }
-
-          await writable.close();
-          return true;
-        } catch (err) {
-          // If aborted or error, we should abort the writable to delete/invalidate the file
-          try { if (writable) await writable.abort(); } catch (_) {}
-          
-          // Additional cleanup: If we have the handle, can we delete it?
-          // File System Access API's createWritable().abort() usually leaves an empty file or partial file 
-          // depending on browser implementation.
-          // Chrome's implementation of abort() on a writable stream should prevent the file from being saved/closed properly,
-          // effectively "deleting" the temporary data, but the file entry might remain if created.
-          // Unfortunately, the API doesn't provide a direct 'delete' method for the handle itself here.
-          // However, calling abort() on the writable stream is the standard way to discard changes.
-          
-          // If aborted, stop trying other URLs and re-throw
-          if (signal.aborted || (err && err.name === 'AbortError')) throw err;
-        }
-      }
-
-      throw new Error(`${label} ${T.dlFail}`);
-    };
-
-    const takeFirstChars = (s, n) => Array.from(String(s || "")).slice(0, n).join("");
-
-    const exportAudioPreferred = async ({ urls, safeName, mode, handle: providedHandle }) => {
-      const list = Array.isArray(urls) ? urls : (urls ? [urls] : []);
-      let lastErr;
-      let bin = null;
-      for (const u of list) {
-        if (!u) continue;
-        try {
-          bin = await fetchToFFmpeg(u, "音频");
-          break;
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      if (!bin) throw lastErr || new Error(T.dlFail);
-
-      overlay.setStep(T.exportAudio);
-      const ff = await loadFFmpeg();
-      ff.FS("writeFile", "a.m4s", bin);
-      let outName = null;
-      let outData = null;
+      let res;
       try {
-          await ff.run("-i", "a.m4s", "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "out.mp3");
-          outData = ff.FS("readFile", "out.mp3");
-          ff.FS("unlink", "out.mp3");
-          outName = `${T.audio}-${safeName}.mp3`;
-        } catch (e1) {
-        try {
-          await ff.run("-i", "a.m4s", "-vn", "-c:a", "mp3", "-b:a", "192k", "out.mp3");
-          outData = ff.FS("readFile", "out.mp3");
-          ff.FS("unlink", "out.mp3");
-          outName = `${T.audio}-${safeName}.mp3`;
-        } catch (_) {
-          await ff.run("-i", "a.m4s", "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "out.wav");
-          outData = ff.FS("readFile", "out.wav");
-          ff.FS("unlink", "out.wav");
-          outName = `${T.audio}-${safeName}.wav`;
+        res = await fetch(url, { credentials: "include", referrer: location.href, referrerPolicy: "strict-origin-when-cross-origin", signal });
+        if (res?.status === 403) res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+        if (!res?.ok || !res?.body) throw new Error("fetch_failed");
+      } catch {
+        res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+      }
+
+      const total = Number(res.headers.get("content-length")) || 0;
+      const reader = res.body.getReader();
+      let loaded = 0, lastUpdate = 0;
+      const start = performance.now();
+
+      while (true) {
+        if (signal.aborted) { try { await writable.abort(); } catch (_) {} throw new Error("Aborted"); }
+        const { done, value } = await reader.read();
+        if (done) break;
+        await writable.write(value);
+        loaded += value.length;
+        const now = performance.now();
+        if (now - lastUpdate > 200) {
+          lastUpdate = now;
+          const elapsed = (now - start) / 1000;
+          const speed = loaded / Math.max(0.1, elapsed);
+          const pct = total ? (loaded / total) * 100 : 0;
+          if (onProgress) onProgress({ loaded, total, speed, pct });
         }
-      } finally {
-        try { ff.FS("unlink", "a.m4s"); } catch (_) {}
       }
-
-      if (providedHandle) {
-         let w;
-         try { w = await providedHandle.createWritable({ keepExistingData: false }); } catch (_) { w = await providedHandle.createWritable(); }
-         await w.write(outData);
-         await w.close();
-         return true;
-      }
-
-      if (mode === "picker" && window.showSaveFilePicker) {
-        const handle = await window.showSaveFilePicker({ suggestedName: outName });
-        let w;
-        try { w = await handle.createWritable({ keepExistingData: false }); } catch (_) { w = await handle.createWritable(); }
-        await w.write(outData);
-        await w.close();
-        return true;
-      }
-
-      const blob = new Blob([outData.buffer]);
-      const u = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = u;
-      a.download = outName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      return true;
+      await writable.close();
+      return { loaded, total };
     };
 
-    const startSplitStreamingSave = async () => {
-      const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
-      const safeName = getSafeFilename(takeFirstChars(baseTitle, 10));
-      
+    // ============================================================
+    // 7. Streaming Merge (FFmpeg-free, sequential streams)
+    // ============================================================
+    const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
       if (!window.showSaveFilePicker) {
-        alert("您的浏览器不支持流式保存 API");
+        // Fallback: download via service worker (separate files)
+        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
         return;
       }
-      
-      // 1. 预先获取所有文件句柄（在用户手势有效期内）
-      let vHandle, aHandle;
+
+      // IMPORTANT: Request file handle EARLY while user gesture is still active
+      // showSaveFilePicker must be called in response to a user gesture
+      let fileHandle;
       try {
-          vHandle = await window.showSaveFilePicker({ 
-              suggestedName: `${T.video}-${safeName}.mp4`,
-              types: [{ description: 'MP4 Video', accept: {'video/mp4': ['.mp4']} }]
-          });
-          
-          // 提示用户下一步
-          overlay.setDetail(T.selectAudio);
-          
-          aHandle = await window.showSaveFilePicker({ 
-              suggestedName: `${T.audio}-${safeName}.m4a`,
-              types: [{ description: 'M4A Audio', accept: {'audio/mp4': ['.m4a']} }] 
-          });
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName: filename + ".mp4",
+          types: [{ description: 'MP4', accept: {'video/mp4': ['.mp4']} }]
+        });
       } catch (e) {
-          if (e.name === 'AbortError') {
-              overlay.setDetail(T.canceled);
-              setTimeout(() => overlay.remove(), 2000);
-              return;
-          }
-          throw e;
+        if (e.name === 'AbortError') { overlay.remove(); return; }
+        throw e;
       }
 
-      overlay.setProgress(0);
-      overlay.setStep(T.dlStep + "..."); // Set a generic downloading title
-      
-      // 2. 执行保存
-      // Parallel execution to download both streams simultaneously
-      
-      // Ensure cancel button is active (it might have been set to "Close" by previous errors or done states)
-      overlay.resetCancelBtn();
-      
-      const videoPromise = streamToFile({
-        urls: getVideoUrlCandidates(vTrackArr),
-        label: T.video,
-        progressBase: 0,
-        progressScale: 0.8, // Video takes 80% weight
-        handle: vHandle
+      overlay.setStep(T.coreLoad);
+      overlay.setDetail("准备下载...");
+
+      // Request FFmpeg files from service worker via bridge (MAIN world cannot call chrome.runtime directly)
+      const requestFFmpegFromSW = () => new Promise((resolve, reject) => {
+        console.log("[FFmpeg] Requesting FFmpeg from service worker via bridge...");
+        const requestId = 'ffmpeg_' + Date.now();
+        const timeout = setTimeout(() => {
+          window.removeEventListener('BILI_FFMPEG_RESPONSE', handler);
+          reject(new Error("FFmpeg request timeout"));
+        }, 25000);
+        const handler = (e) => {
+          if (e.detail?.requestId !== requestId) return;
+          clearTimeout(timeout);
+          window.removeEventListener('BILI_FFMPEG_RESPONSE', handler);
+          if (e.detail?.success) {
+            console.log("[FFmpeg] SW returned", e.detail.files.length, "files:", e.detail.files.map(f => f.path + "(" + f.size + "B)").join(", "));
+            resolve({ files: e.detail.files, extId: e.detail.extId });
+          } else {
+            reject(new Error("SW error: " + (e.detail?.error || "unknown")));
+          }
+        };
+        window.addEventListener('BILI_FFMPEG_RESPONSE', handler);
+        window.dispatchEvent(new CustomEvent("BILI_TRIGGER_FFMPEG", { detail: { requestId } }));
       });
-      
-      // We don't need to call exportAudioPreferred because it internally loads FFmpeg which causes the issue
-      // Instead, we should implement a simple streamToAudioFile similar to streamToFile but for audio
-      // to avoid loading FFmpeg when it's not needed for simple downloading
-      
-      const simpleStreamAudio = async () => {
-         const list = Array.isArray(aAllUrls) ? aAllUrls : (aAllUrls ? [aAllUrls] : []);
-         // Use the existing streamToFile logic but for audio
-         await streamToFile({
-            urls: list,
-            label: T.audio,
-            progressBase: 80, // Audio starts updating after 80%? No, parallel.
-            // Actually, overlay progress might jump around if both update same bar.
-            // But let's just reuse streamToFile for now.
-            progressScale: 0.2,
-            handle: aHandle
-         });
+
+      // Load FFmpeg - request from service worker (the reliable path)
+      const loadFFmpeg = async () => {
+        console.log("[FFmpeg] Starting loadFFmpeg via service worker...");
+        console.log("[FFmpeg] SharedArrayBuffer:", !!window.SharedArrayBuffer);
+
+        // Load ffmpeg.min.js first via script tag with timeout
+        const ffmpegUrl = window.__FFMPEG_URL__;
+        if (ffmpegUrl && !window.FFmpeg) {
+          console.log("[FFmpeg] Loading ffmpeg.min.js via script tag:", ffmpegUrl);
+          await Promise.race([
+            new Promise((res, rej) => {
+              const s = document.createElement("script");
+              s.src = ffmpegUrl;
+              s.onload = () => { console.log("[FFmpeg] ffmpeg.min.js loaded OK"); res(); };
+              s.onerror = (e) => { console.error("[FFmpeg] ffmpeg.min.js load error:", e); rej(new Error("ffmpeg.min.js failed")); };
+              (document.head || document.documentElement).appendChild(s);
+            }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("ffmpeg.min.js load timeout")), 15000))
+          ]);
+        }
+        if (!window.FFmpeg?.createFFmpeg) throw new Error("FFmpeg library not loaded");
+
+        // Request core files from service worker to get extension ID
+        const { files, extId } = await Promise.race([
+          requestFFmpegFromSW(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("SW request timeout")), 20000))
+        ]);
+        if (!files?.length || !extId) throw new Error("No FFmpeg files or extension ID from SW");
+
+        // Determine MT vs ST
+        const useMT = !!window.SharedArrayBuffer;
+        const corePath = useMT ? 'ffmpeg/ffmpeg-core.js' : (files.find(f => f.path === 'ffmpeg/ffmpeg-core-st.js') ? 'ffmpeg/ffmpeg-core-st.js' : 'ffmpeg/ffmpeg-core.js');
+        const wasmPath = useMT ? 'ffmpeg/ffmpeg-core.wasm' : (files.find(f => f.path === 'ffmpeg/ffmpeg-core-st.wasm') ? 'ffmpeg/ffmpeg-core-st.wasm' : 'ffmpeg/ffmpeg-core.wasm');
+
+        console.log("[FFmpeg] Using", useMT ? "MT" : "ST", "core:", corePath, "wasm:", wasmPath, "extId:", extId);
+
+        // Build extension URLs for direct loading (files are web_accessible_resources)
+        const coreJsUrl = `chrome-extension://${extId}/${corePath}`;
+        const wasmUrl = `chrome-extension://${extId}/${wasmPath}`;
+        console.log("[FFmpeg] Core JS URL:", coreJsUrl);
+        console.log("[FFmpeg] WASM URL:", wasmUrl);
+
+        // Set up Module.locateFile BEFORE loading core JS, so it intercepts WASM loading
+        window.Module = window.Module || {};
+        window.Module.locateFile = (p) => {
+          if (p && p.endsWith('.wasm')) return wasmUrl;
+          return p;
+        };
+
+        // Load core JS from extension URL directly
+        await Promise.race([
+          new Promise((res, rej) => {
+            const s = document.createElement("script");
+            s.src = coreJsUrl;
+            s.onload = () => { console.log("[FFmpeg] Core JS loaded OK"); res(); };
+            s.onerror = (e) => { console.error("[FFmpeg] Core JS load error:", e); rej(new Error("Core JS script failed")); };
+            (document.head || document.documentElement).appendChild(s);
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("Core JS load timeout")), 15000))
+        ]);
+
+        const createFFmpeg = window.FFmpeg.createFFmpeg;
+
+        // Create FFmpeg with WASM path pointing to extension URL
+        const ffmpeg = createFFmpeg({ wasmPath: wasmUrl, log: true });
+        console.log("[FFmpeg] Calling ffmpeg.load()...");
+        try {
+          await Promise.race([
+            ffmpeg.load(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("ffmpeg.load() timeout")), 30000))
+          ]);
+          console.log("[FFmpeg] FFmpeg loaded successfully!");
+          return ffmpeg;
+        } catch (e) {
+          console.error("[FFmpeg] ffmpeg.load() failed:", e);
+          throw e;
+        }
       };
 
-      const audioPromise = simpleStreamAudio();
-      
-      await Promise.all([videoPromise, audioPromise]);
-
-      overlay.setStep(T.dlDone);
-      overlay.setProgress(100);
-      overlay.done();
-      setTimeout(() => overlay.remove(), 5000);
-    };
-
-    window.addEventListener("BILI_DOWNLOAD_ERROR", (e) => {
-      const msg = e?.detail?.message || T.dlFail;
-      overlay.setStep(T.dlFailTitle);
-      overlay.setDetail(msg);
-      if (window.showSaveFilePicker) {
-        overlay.addBtn(T.streamSave, async () => {
+      // Fetch into memory with backup URL support
+      const fetchBin = async (urls, label) => {
+        if (!Array.isArray(urls)) urls = [urls];
+        overlay.setStep(`${T.dlStep}${label}...`);
+        console.log(`[FetchBin] ${label} URLs to try:`, urls);
+        
+        let lastError = null;
+        for (let i = 0; i < urls.length; i++) {
+          const url = urls[i];
           try {
-            await startSplitStreamingSave();
-          } catch (err) {
-            overlay.setStep(T.dlFail);
-            overlay.setDetail(err && err.message ? err.message : T.dlFail);
-            overlay.done();
-          }
-        });
-      }
-      overlay.done();
-    });
-
-    // MOVED UP: getSafeFilename was here, now moved before usage in logic flow
-
-    const loadFFmpeg = async () => {
-       overlay.setStep(T.coreLoad);
-       
-       const loadScript = (url) => new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src = url;
-          s.onload = res;
-          s.onerror = rej;
-          document.head.appendChild(s);
-       });
-
-       // Try injected URLs first
-       if (window.__FFMPEG_URL__) {
-           try {
-               // If FFmpeg is already loaded (by popup injection), we might not need to load it again.
-               // But for safety, we check.
-               if (!window.FFmpeg) {
-                   await loadScript(window.__FFMPEG_URL__);
-               }
-           } catch(e) { console.warn("Local FFmpeg load failed", e); }
-       }
-       
-       if (!window.FFmpeg) {
-           throw new Error("FFmpeg library not loaded. Please ensure extension is installed correctly.");
-       }
-       
-       const createFFmpeg = window.FFmpeg.createFFmpeg;
-       
-       // Helper to load FFmpeg
-       const tryLoad = async (corePath, mainName) => {
-           console.log("[BiliDown] Preparing to load FFmpeg from:", corePath);
-
-           // 1. Resolve Paths
-           let wasmUrl = corePath.replace(/\.js($|\?)/, '.wasm$1');
-           if (wasmUrl === corePath && !corePath.endsWith('.wasm')) {
-               wasmUrl = corePath + ".wasm";
-           }
-
-           // 2. Fetch WASM and create Blob URL
-           // We do this FIRST so we can inject the URL into the Core JS
-           const wasmRes = await fetch(wasmUrl);
-           if (!wasmRes.ok) throw new Error(`Failed to fetch WASM: ${wasmRes.status}`);
-           const wasmBuf = await wasmRes.arrayBuffer();
-           
-           // Verify Magic Bytes
-           const view = new Uint8Array(wasmBuf.slice(0, 4));
-           if (view[0] !== 0x00 || view[1] !== 0x61 || view[2] !== 0x73 || view[3] !== 0x6d) {
-               console.error("[BiliDown] Invalid WASM Magic Bytes:", view);
-               throw new Error("Invalid WASM file (detected JS or other content)");
-           }
-           
-           const wasmBlob = new Blob([wasmBuf], { type: 'application/wasm' });
-           const wasmBlobUrl = URL.createObjectURL(wasmBlob);
-           console.log("[BiliDown] WASM Blob URL:", wasmBlobUrl);
-
-           // 3. Fetch Core JS Text
-           const jsRes = await fetch(corePath);
-           if (!jsRes.ok) throw new Error(`Failed to fetch Core JS: ${jsRes.status}`);
-           let jsText = await jsRes.text();
-
-           // 4. Inject WASM Blob URL into Core JS
-           // This forces the Core to load the WASM from our verified Blob URL
-           // We look for the standard Emscripten pattern or just override locateFile
-           
-           // Pattern 1: Replace default filename
-           // Note: ffmpeg-core-st.js usually contains "ffmpeg-core-st.wasm" string
-           if (jsText.includes("ffmpeg-core-st.wasm")) {
-               console.log("[BiliDown] Patching WASM filename in Core JS...");
-               jsText = jsText.replaceAll("ffmpeg-core-st.wasm", wasmBlobUrl);
-           } else if (jsText.includes("ffmpeg-core.wasm")) {
-               jsText = jsText.replaceAll("ffmpeg-core.wasm", wasmBlobUrl);
-           }
-           
-           // Pattern 2: Override locateFile behavior by prepending config
-           // We inject a Module config that forces locateFile to return our blob URL for the wasm file
-           const overrideScript = `
-             var Module = typeof Module !== 'undefined' ? Module : {};
-             Module.locateFile = function(path, scriptDirectory) {
-               if (path.endsWith('.wasm')) return "${wasmBlobUrl}";
-               return scriptDirectory + path;
-             };
-           `;
-           
-           // Combine: Override + Original Source
-           const finalJsContent = overrideScript + "\n" + jsText;
-           
-           const jsBlob = new Blob([finalJsContent], { type: 'application/javascript' });
-           const coreBlobUrl = URL.createObjectURL(jsBlob);
-           console.log("[BiliDown] Patched Core JS Blob URL:", coreBlobUrl);
-
-           // 5. Initialize FFmpeg
-           const f = createFFmpeg({
-               corePath: coreBlobUrl,
-               wasmPath: wasmBlobUrl, // Redundant if patched, but good for safety
-               workerPath: coreBlobUrl,
-               log: true,
-               mainName: mainName
-           });
-           
-           try {
-               await f.load();
-               console.log("[BiliDown] FFmpeg loaded successfully");
-           } catch (e) {
-               console.error("[BiliDown] FFmpeg load failed:", e);
-               URL.revokeObjectURL(coreBlobUrl);
-               URL.revokeObjectURL(wasmBlobUrl);
-               throw e;
-           }
-           return f;
-       };
-
-       let ffmpeg;
-       
-       // Strategy 1: Local Multi-Threaded (Default)
-       // Requires SharedArrayBuffer (COOP/COEP headers)
-       try {
-           if (window.SharedArrayBuffer && window.__FFMPEG_CORE_URL__) {
-               ffmpeg = await tryLoad(window.__FFMPEG_CORE_URL__);
-           } else {
-               throw new Error("SharedArrayBuffer missing or local core not found");
-           }
-       } catch (e1) {
-           console.log("MT FFmpeg failed, switching to Local ST...", e1);
-           
-           // Strategy 2: Local Single-Threaded
-           try {
-               if (window.__FFMPEG_CORE_ST_URL__) {
-                   ffmpeg = await tryLoad(window.__FFMPEG_CORE_ST_URL__, 'main');
-               } else {
-                   throw new Error("Local ST core not found");
-               }
-           } catch (e2) {
-               console.warn("Local ST FFmpeg failed", e2);
-               throw new Error("Unable to load FFmpeg core. Please reload the page and try again.");
-           }
-       }
-       
-       return ffmpeg;
-    };
-
-    const fetchToFFmpeg = async (u, label) => {
-      const r = await fetch(u, { credentials: "omit", referrerPolicy: "strict-origin-when-cross-origin", signal });
-      if (!r.ok) throw new Error(`${label}下载失败: ${r.status}`);
-      
-      const total = Number(r.headers.get("content-length")) || 0;
-      const MAX_SIZE = 1.8 * 1024 * 1024 * 1024; // 1.8GB
-      
-      if (total > MAX_SIZE) {
-          const e = new Error("File too large");
-          e.name = "BigFileError";
-          e.total = total;
-          throw e;
-      }
-
-      const reader = r.body.getReader();
-      const chunks = [];
-      let loaded = 0;
-      const start = performance.now();
-      
-      overlay.setStep(`${T.dlStep}${label}...`);
-      
-      while(true) {
-          if (signal.aborted) throw new Error("Aborted");
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (signal.aborted) throw new Error("Aborted");
-          chunks.push(value);
-          loaded += value.length;
-          
-          if (total) {
-              const p = (loaded / total) * 100;
-              // Only update UI every 1% or so to save performance? No, let's just do it.
-              overlay.setProgress(p * 0.5); // 50% for download phase? 
-              // Wait, this function is called twice. 
-              // We should handle progress better. But let's keep it simple.
-              
+            console.log(`[FetchBin] Trying ${label} URL ${i + 1}/${urls.length}`);
+            let res;
+            try {
+              // First try with credentials (same as streamDownload)
+              res = await fetch(url, { credentials: "include", referrer: location.href, referrerPolicy: "strict-origin-when-cross-origin", signal });
+              if (res?.status === 403 || !res?.ok) {
+                // If 403 or failed, try without credentials
+                console.log(`[FetchBin] First attempt failed, trying without credentials`);
+                res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+              }
+            } catch (e) {
+              console.warn(`[FetchBin] First fetch attempt failed:`, e);
+              // Fallback to without credentials
+              res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+            }
+            
+            if (!res?.ok || !res?.body) throw new Error(`${label} fetch failed, status: ${res?.status}`);
+            
+            const total = Number(res.headers.get("content-length")) || 0;
+            const reader = res.body.getReader();
+            const chunks = []; let loaded = 0;
+            const start = performance.now();
+            while (true) {
+              if (signal.aborted) throw new Error("Aborted");
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value); loaded += value.length;
               const elapsed = (performance.now() - start) / 1000;
-              const speed = loaded / elapsed;
-              // const eta = (total - loaded) / speed; // Unused
-              
-              // Only update Detail, NOT progress bar (let main loop handle overall progress?)
-              // No, let's update progress bar relative to download phase (0-90%)
-              // But we have 2 files. Let's make it simpler:
-              // Video is usually 80-90% of size. Audio is small.
-              // Just show text detail in overlay.
-              
-              overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(speed)}/s)`);
-          } else {
-              overlay.setDetail(`${label}: ${fmtBytes(loaded)}`);
+              const pct = total ? (loaded / total) * 100 : 0;
+              overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(loaded/Math.max(0.1,elapsed))}/s) ${pct.toFixed(0)}%`);
+            }
+            const buf = new Uint8Array(loaded);
+            let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+            console.log(`[FetchBin] ${label} download OK, size: ${buf.byteLength} bytes`);
+            return buf;
+          } catch (e) {
+            lastError = e;
+            console.error(`[FetchBin] ${label} URL ${i + 1} failed:`, e);
+            if (signal.aborted) throw e;
           }
-      }
-      
-      // Merge chunks to Uint8Array
+        }
+        console.error(`[FetchBin] All ${label} URLs failed`);
+        throw lastError || new Error(`${label} fetch failed`);
+      };
+
+      // First try to merge in memory
+      let vBin, aBin;
       try {
-          const out = new Uint8Array(loaded);
-          let offset = 0;
-          for (const c of chunks) { out.set(c, offset); offset += c.length; }
-          return out;
-      } catch (e) {
-          const err = new Error("Memory allocation failed");
-          err.name = "OOMError";
-          err.chunks = chunks;
-          throw err;
+        overlay.setStep(`${T.dlStep}${T.video}...`);
+        overlay.setProgress(5);
+        vBin = await fetchBin(vAllUrls, T.video);
+
+        overlay.setProgress(45);
+        overlay.setStep(`${T.dlStep}${T.audio}...`);
+        aBin = await fetchBin(aAllUrls, T.audio);
+      } catch(e) {
+        if (e?.message === "Aborted") throw e;
+        console.error("[BiliDown] Fetch failed, falling back to separate download:", e);
+        // If fetch failed, fall back to separate download via service worker
+        overlay.setStep(T.errTitle);
+        overlay.setDetail("下载失败，是否尝试分别下载？");
+        if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || "下载失败"))) {
+          triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+          setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+        } else {
+          overlay.remove();
+        }
+        return;
       }
-    };
 
-    // 5. Execution Flow
-    try {
-        let vBin = null, aBin = null;
-        
-        // Video
-        try {
-            vBin = await fetchToFFmpeg(vUrl, T.video);
-        } catch (e) {
-            if (e.name === "BigFileError" || e.name === "OOMError") {
-                throw e; // Bubble up to main catch
-            }
-            throw e;
+      const MAX_SIZE_FOR_MERGE = 1.8 * 1024 * 1024 * 1024; // 1.8GB
+      const totalSize = vBin.byteLength + aBin.byteLength;
+      console.log("[SizeCheck] Total size after download:", totalSize, "Max:", MAX_SIZE_FOR_MERGE);
+
+      if (totalSize > MAX_SIZE_FOR_MERGE) {
+        console.log("[SizeCheck] Files too large after download");
+        overlay.setStep(T.bigFile);
+        overlay.setDetail(T.bigFileDetail);
+        if (confirm(T.bigFileConfirm)) {
+          triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+          setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+        } else {
+          overlay.remove();
         }
+        return;
+      }
 
-        // Audio
-        try {
-            aBin = await fetchToFFmpeg(aUrl, T.audio);
-        } catch (e) {
-             if (e.name === "BigFileError" || e.name === "OOMError") {
-                // If video was already downloaded in memory, we might crash here.
-                // But we can try to save video at least.
-                e.vBin = vBin;
-                throw e;
-            }
-            throw e;
-        }
+      overlay.setStep(T.merge);
+      overlay.setProgress(85);
 
-        // Merge
-        overlay.setStep("正在合并...");
-        overlay.setProgress(90);
-        
+      try {
         const ffmpeg = await loadFFmpeg();
         ffmpeg.FS("writeFile", "v.m4s", vBin);
-        const vLen = vBin.length; // Keep length for stats if needed
-        vBin = null; // GC
         ffmpeg.FS("writeFile", "a.m4s", aBin);
-        const aLen = aBin.length;
-        aBin = null; // GC
-        
         await ffmpeg.run("-i", "v.m4s", "-i", "a.m4s", "-c", "copy", "out.mp4");
-        
         const out = ffmpeg.FS("readFile", "out.mp4");
-        ffmpeg.FS("unlink", "out.mp4");
-        ffmpeg.FS("unlink", "v.m4s");
-        ffmpeg.FS("unlink", "a.m4s");
+        ffmpeg.FS("unlink", "out.mp4"); ffmpeg.FS("unlink", "v.m4s"); ffmpeg.FS("unlink", "a.m4s");
+        vBin = null; aBin = null;
 
-        // Save
+        // Save via File System Access API (handle obtained early)
         overlay.setStep(T.saveFile);
-        
-        // Prefer automatic download via <a> tag
-        try {
-            const blob = new Blob([out.buffer], { type: "video/mp4" });
-            const u = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = u;
-            a.download = filename + ".mp4";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(() => URL.revokeObjectURL(u), 60000);
-        } catch (e) {
-            console.warn("Auto download failed, trying manual picker...", e);
-            // Fallback to manual picker if auto download fails
-            if (window.showSaveFilePicker) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: filename + ".mp4",
-                        types: [{ description: 'MP4 Video', accept: {'video/mp4': ['.mp4']} }],
-                    });
-                    const w = await handle.createWritable();
-                    await w.write(out);
-                    await w.close();
-                } catch (e2) {
-                    console.error("Manual picker failed", e2);
-                    throw e; // Throw original error or new one?
-                }
-            } else {
-                throw e;
-            }
-        }
-        
+        const w = await fileHandle.createWritable();
+        await w.write(out);
+        await w.close();
+
         overlay.setStep(T.dlDone);
         overlay.setProgress(100);
         overlay.done();
         setTimeout(() => overlay.remove(), 5000);
-
-    } catch (e) {
-        console.error("Download Error", e);
-        
-        if (e.name === "AbortError" || e.message === "Aborted") {
-            overlay.setStep(T.canceled);
-            setTimeout(() => overlay.remove(), 2000);
-            return;
+        return;
+      } catch(e) {
+        console.warn("[FFmpeg] Merge failed:", e);
+        if (e?.name === 'AbortError' || e?.message === 'Aborted' || signal?.aborted) {
+          overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return;
         }
+      }
 
-        // Handle Big File / OOM
-        if (e.name === "BigFileError" || e.name === "OOMError" || e.message.includes("File too large")) {
-            overlay.setStep(T.bigFile);
-            overlay.setDetail(T.bigFileDetail);
-            
-            // Allow UI update
-            await new Promise(r => setTimeout(r, 100));
-            
-            // Auto switch to Stream Save if supported
-            if (window.showSaveFilePicker) {
-                 try {
-                      await startSplitStreamingSave();
-                 } catch (err) {
-                      if (err.name === 'AbortError' || err.message === 'Aborted') {
-                          overlay.setStep(T.canceled);
-                          setTimeout(() => overlay.remove(), 2000);
-                          return;
-                      }
-                      overlay.setStep(T.dlFailTitle);
-                      overlay.setDetail(err && err.message ? err.message : T.dlFail);
-                      overlay.done();
-                 }
-                 return;
-            }
+      // If merge failed, offer separate download via service worker
+      overlay.setStep(T.errTitle);
+      overlay.setDetail("合并失败，是否分别下载视频和音频？");
+      if (confirm(T.mergeFailConfirm.replace("{msg}", "合并过程出错"))) {
+        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+      } else {
+        overlay.remove();
+      }
+    };
 
-            if (confirm(T.bigFileConfirm)) {
-                const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
-                const safeName = getSafeFilename(takeFirstChars(baseTitle, 10));
-                triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: `${T.video}-${safeName}.mp4` });
-                setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: `${T.audio}-${safeName}.m4a` }), 1000);
-                if (window.showSaveFilePicker) {
-                  overlay.addBtn(T.streamSave, async () => {
-                    try {
-                      await startSplitStreamingSave();
-                    } catch (err) {
-                      overlay.setStep(T.dlFailTitle);
-                      overlay.setDetail(err && err.message ? err.message : T.dlFail);
-                      overlay.done();
-                    }
-                  });
-                }
-            }
-            
-            overlay.done();
-            return;
-        }
+    const triggerBgDownload = payload => {
+      overlay.setStep(T.browserDl);
+      overlay.setProgress(100);
+      overlay.setDetail(T.browserDlDetail);
+      overlay.done();
+      window.dispatchEvent(new CustomEvent("BILI_TRIGGER_DOWNLOAD", { detail: payload }));
+    };
 
-        if (e.name === "AbortError") {
-            // Already handled above, but just in case
-            overlay.setStep(T.canceled);
-            setTimeout(() => overlay.remove(), 2000);
-            return;
-        }
+    window.addEventListener("BILI_DOWNLOAD_ERROR", e => {
+      overlay.setStep(T.dlFailTitle);
+      overlay.setDetail(e?.detail?.message || T.dlFail);
+      overlay.done();
+    });
 
-        // Critical Fallback: Save separate files if download succeeded but merge failed
-        // Note: vBin/aBin are local to the try block above, but we can't easily access them here
-        // unless we lift them up. However, due to scope, we need to redefine them outside.
-        // Wait, I cannot redefine 'vBin' here because it's inside the 'try' block in the original code.
-        // I need to change the structure in the 'SearchReplace'.
-        
-        overlay.setStep(T.errTitle);
-        overlay.setDetail(e.message);
-        
-        // Check if it is a fetch error during merge (e.g. ffmpeg load)
-        if (confirm(T.mergeFailConfirm.replace("{msg}", e.message))) {
-             const baseTitle = (videoTitle || rawTitle || "bilibili_video").trim();
-             const safeName = getSafeFilename(takeFirstChars(baseTitle, 10));
-             if (vUrl) triggerBgDownload({ urls: getVideoUrlCandidates(vTrackArr), url: vUrl, filename: `${T.video}-${safeName}.mp4` });
-             if (aUrl) setTimeout(() => triggerBgDownload({ urls: getAllUrls(aTrack), url: aUrl, filename: `${T.audio}-${safeName}.m4a` }), 1000);
-        }
+    // ============================================================
+    // 8. Main Flow
+    // ============================================================
+    overlay.setStep(T.parse);
+
+    const mpi = getMultiPartInfo();
+    let selIdx = 0, selPage = null;
+    if (mpi?.pages?.length > 1) {
+      const sel = await showPartSelector(mpi.pages, mpi.currentIndex);
+      if (!sel) { overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return; }
+      selIdx = sel.index; selPage = sel.page;
     }
 
-  } catch (err) {
-    // Show error in overlay
-    const overlay = document.getElementById("bili-download-overlay");
-    if (overlay) {
-        // Simple manual update if overlay object is lost in scope (it shouldn't be)
-        // But we are in the main IIFE catch, overlay variable is not accessible here if defined inside.
-        // Wait, 'overlay' is defined inside the IIFE, so it is accessible in this catch block?
-        // NO. 'overlay' is defined inside the 'try' block of the IIFE.
-        // So we cannot access 'overlay' variable here.
-        // We must rely on DOM.
-        const step = overlay.querySelector("div:nth-child(2)"); // Step div
-        const detail = overlay.querySelector("div:nth-child(4)"); // Detail div
-        if (step) step.textContent = T.errTitle;
-        if (detail) detail.textContent = err.message;
-        
-        // Add a close button if not present or stuck
-        // ...
+    let dash;
+    try {
+      dash = await Promise.race([resolveBilibili(selPage?.cid), new Promise((_, r) => setTimeout(() => r(new Error("超时")), 10000))]);
+    } catch(e) {
+      overlay.setStep(T.parseErr); overlay.setDetail(e.message); overlay.done(); return;
+    }
+    if (!dash) { overlay.setStep(T.noInfo); overlay.setDetail(T.noInfoDetail); overlay.done(); setTimeout(() => overlay.remove(), 6000); return; }
+
+    const vArr = dash.video, aArr = dash.audio;
+    console.log('[BiliDown] preferHDR:', preferHDR, '| Total video tracks:', vArr?.length);
+    if (vArr) {
+      vArr.forEach((t, i) => {
+        const cs = String(t.codecs || '');
+        const bw = t.bandwidth || 0;
+        const hdr = isHdr(t);
+        console.log(`  Track ${i}: ${cs} ${hdr ? 'HDR' : 'SDR'} bw=${bw}`);
+      });
+    }
+    const vUrl = pickBestVideo(vArr, preferHDR);
+    const aPick = pickBestAudio(aArr);
+    const aUrl = aPick.url;
+    const vTrack = (vArr || []).find(x => (x.baseUrl || x.base_url || x.url) === vUrl) || vArr?.[0];
+    const aTrack = aPick.track || aArr?.[0];
+
+    // Collect backup URLs ONLY from the target pool (SDR or HDR) to avoid quality mismatch
+    const vPool = (vArr || []).filter(x => preferHDR ? isHdr(x) : !isHdr(x));
+    let vAllUrls = getAllUrls(vTrack);
+    for (const t of vPool) {
+      for (const u of getAllUrls(t)) {
+        if (!vAllUrls.includes(u)) vAllUrls.push(u);
+      }
+    }
+    let aAllUrls = aPick.urls?.length ? aPick.urls : getAllUrls(aTrack);
+    for (const t of aArr || []) {
+      for (const u of getAllUrls(t)) {
+        if (!aAllUrls.includes(u)) aAllUrls.push(u);
+      }
+    }
+    
+    console.log("[BiliDown] vAllUrls:", vAllUrls.length, "aAllUrls:", aAllUrls.length);
+
+    const rawTitle = document.title?.replace("_bilibili", "") || "bilibili_video";
+    let vTitle = null;
+    try { vTitle = window.__INITIAL_STATE__?.videoData?.title || window.__INITIAL_STATE__?.h1Title; } catch (_) {}
+    if (!vTitle) { const mt = document.querySelector('meta[property="og:title"]'); if (mt?.content) vTitle = mt.content; }
+    if (!vTitle) { const h1 = document.querySelector("h1"); const t = h1 && (h1.getAttribute("title") || h1.textContent); if (t) vTitle = t; }
+    if (!vTitle) {
+      try { const info = await getBvid(); if (info?.bvid) {
+        const vr = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${info.bvid}`, { credentials: "include" });
+        const vj = await vr.json(); if (vj?.data?.title) vTitle = vj.data.title;
+      }} catch (_) {}
+    }
+    if (vTitle) vTitle = String(vTitle).trim();
+
+    let fname = safeName(vTitle || rawTitle);
+    if (selPage) { const pn = selPage.part || selPage.title || `P${selIdx+1}`; fname = `${fname}_P${selIdx+1}_${safeName(pn)}`; }
+
+    if (!vUrl || !aUrl) { overlay.setStep(T.noTrack); overlay.setDetail(T.noTrackDetail); overlay.done(); return; }
+
+    console.log("[BiliDown] vUrl:", !!vUrl, "aUrl:", !!aUrl, "fname:", fname);
+
+    // Use streaming merge approach
+    try {
+      await streamMerge({ vUrl, aUrl, filename: fname, vAllUrls, aAllUrls });
+    } catch(e) {
+      console.error("[BiliDown] streamMerge error:", e);
+      if (e?.name === 'AbortError' || e?.message === 'Aborted') {
+        overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return;
+      }
+      overlay.setStep(T.errTitle);
+      overlay.setDetail(e?.message || T.dlFail);
+      if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || ""))) {
+        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${fname}.mp4` });
+        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${fname}.m4a` }), 1000);
+      }
+      overlay.done();
+    }
+
+  } catch(err) {
+    console.error("[BilibiliDownloader] Fatal:", err);
+    const el = document.getElementById("bili-download-overlay");
+    if (el) {
+      const d = el.querySelector("div:nth-child(4)");
+      if (d) d.textContent = err?.message || String(err);
     } else {
-        alert(T.scriptFail + err.message);
+      alert("脚本错误: " + (err?.message || String(err)));
     }
-    console.error(err);
   }
 })();

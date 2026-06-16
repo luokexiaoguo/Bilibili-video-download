@@ -87,6 +87,66 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // Serve FFmpeg files to content script
+  if (msg.action === 'GET_FFMPEG') {
+    const files = msg.files || [
+      'ffmpeg/ffmpeg.min.js',
+      'ffmpeg/ffmpeg-core.js',
+      'ffmpeg/ffmpeg-core.wasm',
+      'ffmpeg/ffmpeg-core-st.js',
+      'ffmpeg/ffmpeg-core-st.wasm'
+    ];
+    log('[ServiceWorker] GET_FFMPEG requested:', files);
+
+    // Content script loads files via chrome-extension:// URLs directly (web_accessible_resources)
+    // Just verify files exist and return their paths/sizes
+    const checkFile = async (path) => {
+      const url = chrome.runtime.getURL(path);
+      const res = await fetch(url, { method: 'HEAD' });
+      if (!res.ok) throw new Error(`FFmpeg file not found: ${path} (${res.status})`);
+      return { path, size: Number(res.headers.get('content-length')) || 0 };
+    };
+
+    Promise.all(files.map(checkFile))
+      .then(results => {
+        log('[ServiceWorker] All FFmpeg files verified');
+        sendResponse({ success: true, files: results });
+      })
+      .catch(err => {
+        log('[ServiceWorker] FFmpeg check error:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+
+    return true; // async response
+  }
+
+  // Fetch video/audio streams from CDN (bypasses content script CORS)
+  if (msg.action === 'FETCH_STREAMS') {
+    const { videoUrl, audioUrl } = msg;
+    console.log('[SW] FETCH_STREAMS:', { videoUrl: videoUrl?.substring(0, 80), audioUrl: audioUrl?.substring(0, 80) });
+    (async () => {
+      try {
+        const headers = { 'Referer': 'https://www.bilibili.com/' };
+        const [vRes, aRes] = await Promise.all([
+          fetch(videoUrl, { headers, credentials: 'include' }),
+          fetch(audioUrl, { headers, credentials: 'include' })
+        ]);
+        console.log('[SW] Fetch results:', { video: vRes.status, audio: aRes.status });
+        if (!vRes.ok || !aRes.ok) {
+          sendResponse({ success: false, error: `HTTP ${vRes.status}/${aRes.status}` });
+          return;
+        }
+        const [vBuf, aBuf] = await Promise.all([vRes.arrayBuffer(), aRes.arrayBuffer()]);
+        console.log('[SW] Stream sizes:', { video: vBuf.byteLength, audio: aBuf.byteLength });
+        sendResponse({ success: true, video: vBuf, audio: aBuf });
+      } catch (e) {
+        console.log('[SW] FETCH_STREAMS error:', e.message);
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
   // Example: open a new tab
   if (msg.action === 'OPEN_TAB') {
     chrome.tabs.create({ url: msg.url, active: msg.active !== false }, () => {

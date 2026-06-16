@@ -21,6 +21,14 @@ button:active{transform:scale(0.98)}
 .footer{margin-top:15px;font-size:12px;color:#666;text-align:center;border-top:1px solid #333;padding-top:15px}
 .footer a{color:#FB7299;text-decoration:none}
 .footer a:hover{text-decoration:underline}
+.quality-group{display:flex;gap:8px;margin-bottom:15px}
+.quality-opt{flex:1;position:relative;cursor:pointer}
+.quality-opt input{position:absolute;opacity:0;width:0;height:0}
+.quality-card{background:#2d2d2d;border:1px solid #3a3a3a;border-radius:8px;padding:10px;text-align:center;transition:all 0.2s;height:100%;box-sizing:border-box}
+.quality-opt input:checked + .quality-card{background:rgba(251,114,153,0.1);border-color:#FB7299;box-shadow:0 0 0 1px #FB7299}
+.quality-title{display:block;color:#fff;font-weight:600;font-size:13px;margin-bottom:2px}
+.quality-desc{display:block;color:#888;font-size:11px;line-height:1.3}
+.quality-opt input:checked + .quality-card .quality-title{color:#FB7299}
 </style>
 </head>
 <body>
@@ -28,11 +36,27 @@ button:active{transform:scale(0.98)}
   <h3 data-i18n="popupTitle">B站离线舱-番剧电影下载器</h3>
   <button id="langToggle" class="lang-btn">EN</button>
 </div>
+<div class="quality-group">
+  <label class="quality-opt">
+    <input type="radio" name="video_quality" value="hdr" checked>
+    <div class="quality-card">
+      <span class="quality-title" data-i18n="lblHdr">HDR / 杜比</span>
+      <span class="quality-desc" data-i18n="descHdr">色彩生动 专用</span>
+    </div>
+  </label>
+  <label class="quality-opt">
+    <input type="radio" name="video_quality" value="sdr">
+    <div class="quality-card">
+      <span class="quality-title" data-i18n="lblSdr">SDR (H.265)</span>
+      <span class="quality-desc" data-i18n="descSdr">兼容性好 推荐</span>
+    </div>
+  </label>
+</div>
 <div class="tips">
   <p data-i18n="tipsTitle">💡 使用小贴士</p>
   <ul>
     <li data-i18n="tipStream"><b>流式保存</b>：针对超大文件（>1.8GB），插件会自动弹出两次保存对话框（分别保存视频/音频），请务必保持弹窗与页面开启直至完成。</li>
-    <li data-i18n="tipQuality">插件会自动选择当前视频可用的最高画质（如 4K/1080P+），请确保大会员账号已登录。</li>
+    <li data-i18n="tipQuality">插件会自动选择当前视频可用的最高画质（如 4K/1080P+），请确保大会员账号已登录。如果您选择了 HDR 但当前视频（或您的账号）不支持，插件会自动降级为您下载最高画质的 SDR 版本。</li>
   </ul>
 </div>
 <button id="send" data-i18n="btnDownload">一键下载（最高支持8K）</button>
