@@ -91,6 +91,10 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.7 (2026-06-18)
+- **Fix**: Lowered in-memory merge threshold to 800MB to prevent WASM out-of-memory crashes on large files.
+- **Optimization**: Shows clear "out of memory" message and auto-offers split download when merge fails.
+
 ### v1.2.6 (2026-06-16)
 - **Fix**: Multi-part videos now download the correct episode selected by the user.
 - **Fix**: FFmpeg WASM loading failure resolved by using direct extension URLs instead of oversized data URLs.

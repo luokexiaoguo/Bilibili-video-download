@@ -33,7 +33,7 @@
         saveFile: "保存文件中...",
         canceled: "已取消",
         bigFile: "文件过大",
-        bigFileDetail: "无法在浏览器内存中合并 >1.8GB 文件",
+        bigFileDetail: "无法在浏览器内存中合并 >800MB 文件",
         bigFileConfirm: "检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？",
         errTitle: "出错啦",
         mergeFailConfirm: "合并失败: {msg}\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)",
@@ -70,7 +70,7 @@
         saveFile: "Saving file...",
         canceled: "Canceled",
         bigFile: "File Too Large",
-        bigFileDetail: "Cannot merge >1.8GB file in browser memory",
+        bigFileDetail: "Cannot merge >800MB file in browser memory",
         bigFileConfirm: "File too large (or OOM). Cannot merge.\n\nDownload video/audio separately?",
         errTitle: "Error",
         mergeFailConfirm: "Merge failed: {msg}\n\nDownload fetched video/audio tracks separately?\n(Data will be lost if not saved)",
@@ -761,7 +761,7 @@
         return;
       }
 
-      const MAX_SIZE_FOR_MERGE = 1.8 * 1024 * 1024 * 1024; // 1.8GB
+      const MAX_SIZE_FOR_MERGE = 0.8 * 1024 * 1024 * 1024; // 800MB (FFmpeg WASM needs 2-3x memory for merge)
       const totalSize = vBin.byteLength + aBin.byteLength;
       console.log("[SizeCheck] Total size after download:", totalSize, "Max:", MAX_SIZE_FOR_MERGE);
 
@@ -806,12 +806,14 @@
         if (e?.name === 'AbortError' || e?.message === 'Aborted' || signal?.aborted) {
           overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return;
         }
+        var ffmpegError = e;
       }
 
       // If merge failed, offer separate download via service worker
       overlay.setStep(T.errTitle);
-      overlay.setDetail("合并失败，是否分别下载视频和音频？");
-      if (confirm(T.mergeFailConfirm.replace("{msg}", "合并过程出错"))) {
+      const isOOM = /Array buffer allocation|out of memory|Cannot allocate/i.test(String(ffmpegError?.message || ''));
+      overlay.setDetail(isOOM ? "内存不足，无法合并。请分别下载视频和音频。" : "合并失败，是否分别下载视频和音频？");
+      if (confirm(T.mergeFailConfirm.replace("{msg}", isOOM ? "内存不足" : "合并过程出错"))) {
         triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
         setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
       } else {
