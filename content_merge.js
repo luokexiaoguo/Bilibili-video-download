@@ -776,8 +776,14 @@
             }
             
             if (!res?.ok || !res?.body) throw new Error(`${label} fetch failed, status: ${res?.status}`);
-            
+
             const total = Number(res.headers.get("content-length")) || 0;
+            console.warn(`[FetchBin] ${label} Content-Length:`, Math.round(total/1024/1024), "MB | Threshold:", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB");
+            // Early abort: if a single track already exceeds merge threshold, don't waste time downloading
+            if (total > 0 && total > MAX_SIZE_FOR_MERGE) {
+              console.warn(`[FetchBin] ${label} alone (${Math.round(total/1024/1024)}MB) exceeds threshold → aborting download`);
+              throw new Error(`FILE_TOO_LARGE:${label}:${total}`);
+            }
             const reader = res.body.getReader();
             const chunks = []; let loaded = 0;
             const start = performance.now();
@@ -816,6 +822,19 @@
         aBin = await fetchBin(aAllUrls, T.audio);
       } catch(e) {
         if (e?.message === "Aborted") throw e;
+        // FILE_TOO_LARGE: Content-Length header already exceeds threshold → split immediately
+        if (String(e?.message || '').startsWith('FILE_TOO_LARGE:')) {
+          console.warn("[SizeCheck] fetchBin aborted early:", e.message);
+          overlay.setStep(T.bigFile);
+          overlay.setDetail(T.bigFileDetail);
+          if (confirm(T.bigFileConfirm)) {
+            triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+            setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+          } else {
+            overlay.remove();
+          }
+          return;
+        }
         console.error("[BiliDown] Fetch failed, falling back to separate download:", e);
         // If fetch failed, fall back to separate download via service worker
         overlay.setStep(T.errTitle);
