@@ -829,10 +829,11 @@
         return;
       }
 
-      // Sizes unknown from HEAD probe (estTotalSize=0), double-check actual downloaded size
-      // This is a safety net only — normally the pre-download probe handles this
-      if (estTotalSize <= 0 && (vBin.byteLength + aBin.byteLength) > MAX_SIZE_FOR_MERGE) {
-        console.log("[SizeCheck] Probe missed size, actual too large → split");
+      // Safety net: always check actual downloaded size against threshold
+      // HEAD probe may fail or return inaccurate values on some CDNs
+      const actualTotalSize = vBin.byteLength + aBin.byteLength;
+      if (actualTotalSize > MAX_SIZE_FOR_MERGE) {
+        console.log("[SizeCheck] Actual size", Math.round(actualTotalSize/1024/1024), "MB exceeds threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB → split");
         overlay.setStep(T.bigFile);
         overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
