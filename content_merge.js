@@ -33,7 +33,7 @@
         saveFile: "保存文件中...",
         canceled: "已取消",
         bigFile: "文件过大",
-        bigFileDetail: "无法在浏览器内存中合并 >800MB 文件",
+        bigFileDetail: "文件大小超出当前设备推荐合并能力",
         bigFileConfirm: "检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？",
         errTitle: "出错啦",
         mergeFailConfirm: "合并失败: {msg}\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)",
@@ -70,7 +70,7 @@
         saveFile: "Saving file...",
         canceled: "Canceled",
         bigFile: "File Too Large",
-        bigFileDetail: "Cannot merge >800MB file in browser memory",
+        bigFileDetail: "File size exceeds recommended merge capacity for this device",
         bigFileConfirm: "File too large (or OOM). Cannot merge.\n\nDownload video/audio separately?",
         errTitle: "Error",
         mergeFailConfirm: "Merge failed: {msg}\n\nDownload fetched video/audio tracks separately?\n(Data will be lost if not saved)",
@@ -577,7 +577,75 @@
       }
 
       overlay.setStep(T.coreLoad);
-      overlay.setDetail("准备下载...");
+      overlay.setDetail("正在评估文件大小...");
+
+      // ============================================================
+      // Quick HEAD probe to estimate file sizes BEFORE downloading
+      // This ensures fast decision: merge or split, with NO wasted download time
+      // ============================================================
+      const probeSize = async (url) => {
+        // Try HEAD first (fastest)
+        try {
+          const r = await fetch(url, { method: 'HEAD', credentials: 'include',
+            referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+          if (r.ok) { const cl = Number(r.headers.get('content-length')); if (cl) return cl; }
+        } catch (e) { /* fall through */ }
+        // Fallback: GET with Range: bytes=0-0 to get Content-Range header
+        try {
+          const r = await fetch(url, { headers: { 'Range': 'bytes=0-0' }, credentials: 'include',
+            referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+          if (r.ok || r.status === 206) {
+            const cr = r.headers.get('content-range');
+            if (cr) { const m = cr.match(/\/(\d+)/); if (m) return Number(m[1]); }
+            const cl = Number(r.headers.get('content-length')); if (cl) return cl;
+          }
+        } catch (e) { /* fall through */ }
+        // Fallback 2: try without credentials
+        try {
+          const r = await fetch(url, { method: 'HEAD', credentials: 'omit',
+            referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin', signal });
+          if (r.ok) { const cl = Number(r.headers.get('content-length')); if (cl) return cl; }
+        } catch (e) { /* fall through */ }
+        return 0; // Unknown size
+      };
+
+      // Dynamic merge threshold: conservative formula to ensure "yes = success"
+      // Chrome WASM heap is ~4GB max; FFmpeg needs ~2.5x file size
+      // 4GB RAM → 500MB, 8GB → 800MB, 16GB → 1.2GB, 32GB+ → 1.8GB
+      const getMergeThreshold = () => {
+        const memGB = navigator.deviceMemory;
+        if (!memGB) { console.log("[SizeCheck] deviceMemory N/A, default 600MB"); return 600 * 1024 * 1024; }
+        let mb;
+        if (memGB >= 32) mb = 1800;
+        else if (memGB >= 16) mb = 1200;
+        else if (memGB >= 8) mb = 800;
+        else mb = 500;
+        console.log("[SizeCheck] deviceMemory:", memGB, "GB → threshold:", mb, "MB");
+        return mb * 1024 * 1024;
+      };
+      const MAX_SIZE_FOR_MERGE = getMergeThreshold();
+
+      // Probe video + audio sizes (fast HEAD requests, ~0.5s total)
+      const [estVideoSize, estAudioSize] = await Promise.all([
+        probeSize(vUrl).catch(() => 0),
+        probeSize(aUrl).catch(() => 0)
+      ]);
+      const estTotalSize = estVideoSize + estAudioSize;
+      console.log("[SizeCheck] Estimated: video", Math.round(estVideoSize/1024/1024), "MB | audio", Math.round(estAudioSize/1024/1024), "MB | total", Math.round(estTotalSize/1024/1024), "MB | threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB");
+
+      // Pre-download decision: if we can estimate and it's too large, split NOW (no wasted download)
+      if (estTotalSize > 0 && estTotalSize > MAX_SIZE_FOR_MERGE) {
+        console.log("[SizeCheck] Estimated total exceeds threshold → offering split download immediately");
+        overlay.setStep(T.bigFile);
+        overlay.setDetail(T.bigFileDetail);
+        if (confirm(T.bigFileConfirm)) {
+          triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
+          setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+        } else {
+          overlay.remove();
+        }
+        return;
+      }
 
       // Request FFmpeg files from service worker via bridge (MAIN world cannot call chrome.runtime directly)
       const requestFFmpegFromSW = () => new Promise((resolve, reject) => {
@@ -761,12 +829,10 @@
         return;
       }
 
-      const MAX_SIZE_FOR_MERGE = 0.8 * 1024 * 1024 * 1024; // 800MB (FFmpeg WASM needs 2-3x memory for merge)
-      const totalSize = vBin.byteLength + aBin.byteLength;
-      console.log("[SizeCheck] Total size after download:", totalSize, "Max:", MAX_SIZE_FOR_MERGE);
-
-      if (totalSize > MAX_SIZE_FOR_MERGE) {
-        console.log("[SizeCheck] Files too large after download");
+      // Sizes unknown from HEAD probe (estTotalSize=0), double-check actual downloaded size
+      // This is a safety net only — normally the pre-download probe handles this
+      if (estTotalSize <= 0 && (vBin.byteLength + aBin.byteLength) > MAX_SIZE_FOR_MERGE) {
+        console.log("[SizeCheck] Probe missed size, actual too large → split");
         overlay.setStep(T.bigFile);
         overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {

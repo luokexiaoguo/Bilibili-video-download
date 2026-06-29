@@ -4,7 +4,7 @@
   "short_name": "__MSG_shortName__",
   "description": "__MSG_appDesc__",
   "default_locale": "zh_CN",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "permissions": ["activeTab", "storage", "downloads", "scripting", "declarativeNetRequest"],
   "host_permissions": [
     "https://*.bilibili.com/*",

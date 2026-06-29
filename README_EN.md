@@ -91,6 +91,11 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.8 (2026-06-29)
+- **Optimization**: Merge threshold now dynamically adapts to device memory (4GB→500MB / 8GB→800MB / 16GB→1.2GB / 32GB+→1.8GB).
+- **Optimization**: Added HEAD request pre-check to estimate file size before downloading — instantly offers split download if exceeds threshold, avoiding wasted download time.
+- **Optimization**: Removed hardcoded "800MB" limit from UI tips.
+
 ### v1.2.7 (2026-06-18)
 - **Fix**: Lowered in-memory merge threshold to 800MB to prevent WASM out-of-memory crashes on large files.
 - **Optimization**: Shows clear "out of memory" message and auto-offers split download when merge fails.
