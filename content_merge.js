@@ -470,21 +470,10 @@
       if (!arr?.length) return null;
       const nonDrm = arr.filter(x => { const v = x && (x.drm_tech_type ?? x.drmTechType ?? x.is_drm ?? x.isDrm); return !(Number(v) > 0 || v === true); });
       const pool = nonDrm.length ? nonDrm : arr;
-      // Dolby Vision (id=126, dvhe/dvh1) has genuine compatibility issues on SDR displays
-      // HDR10/HLG (id=125/127) play fine on SDR screens — only exclude DV for SDR mode
-      const isDV = x => { const id = Number(x?.id || x?.codecid || 0); if (id === 126) return true; return /dolby|vision|dovi|dvhe|dvh1/i.test(String(x?.codecs || "")); };
       const sdr = pool.filter(x => !isHdr(x)), hdr = pool.filter(x => isHdr(x));
-      const compatibleHdr = pool.filter(x => isHdr(x) && !isDV(x)); // HDR10/HLG — safe for SDR playback
-      let target;
-      if (wantHdr) {
-        target = hdr.length ? hdr : pool;
-      } else {
-        // SDR mode: combine true SDR + HDR10/HLG (exclude only Dolby Vision)
-        // Bandwidth sort will naturally pick the highest quality — e.g., 4K HDR10 over 1080P SDR
-        const compat = [...sdr, ...compatibleHdr];
-        target = compat.length ? compat : pool;
-      }
-      console.log('[pickVideo] wantHdr:', wantHdr, '| SDR:', sdr.length, '| HDR:', hdr.length, '| compatibleHdr:', compatibleHdr.length, '| target:', target.length);
+      // Use HDR/SDR pools if isHdr can distinguish; otherwise fall back to SDR pool then full pool
+      let target = (hdr.length > 0 && sdr.length > 0) ? (wantHdr ? hdr : sdr) : (sdr.length ? sdr : pool);
+      console.log('[pickVideo] wantHdr:', wantHdr, '| SDR:', sdr.length, '| HDR:', hdr.length, '| target:', target.length);
       const isHevc = x => x.codecid === 12 || /hev1|hvc1/i.test(String(x.codecs || ""));
       const isAvc = x => x.codecid === 7 || /avc1/i.test(String(x.codecs || ""));
       const isAv1 = x => x.codecid === 13 || /av01/i.test(String(x.codecs || ""));
@@ -969,10 +958,8 @@
     const vTrack = (vArr || []).find(x => (x.baseUrl || x.base_url || x.url) === vUrl) || vArr?.[0];
     const aTrack = aPick.track || aArr?.[0];
 
-    // Collect backup URLs from the appropriate pool to avoid quality mismatch
-    // SDR mode: include SDR + HDR10/HLG (exclude only Dolby Vision which has compatibility issues)
-    const isDV = x => { const id = Number(x?.id || x?.codecid || 0); if (id === 126) return true; return /dolby|vision|dovi|dvhe|dvh1/i.test(String(x?.codecs || "")); };
-    const vPool = (vArr || []).filter(x => preferHDR ? isHdr(x) : !isDV(x));
+    // Collect backup URLs ONLY from the target pool (SDR or HDR) to avoid quality mismatch
+    const vPool = (vArr || []).filter(x => preferHDR ? isHdr(x) : !isHdr(x));
     let vAllUrls = getAllUrls(vTrack);
     for (const t of vPool) {
       for (const u of getAllUrls(t)) {
