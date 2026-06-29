@@ -93,7 +93,8 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ### v1.2.8 (2026-06-29)
 - **Optimization**: Merge threshold now dynamically adapts to device memory (4GB→500MB / 8GB→800MB / 16GB→1.2GB / 32GB+→1.8GB).
-- **Optimization**: Added HEAD request pre-check to estimate file size before downloading — instantly offers split download if exceeds threshold, avoiding wasted download time.
+- **Optimization**: Added HEAD request pre-check + Content-Length early-abort in download — three-layer protection ensures no wasted download time on oversized files.
+- **Fix**: SDR mode no longer incorrectly excludes HDR10 tracks. 4K HDR videos now download at 4K in SDR mode (only Dolby Vision is excluded).
 - **Optimization**: Removed hardcoded "800MB" limit from UI tips.
 
 ### v1.2.7 (2026-06-18)
