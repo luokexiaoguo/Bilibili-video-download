@@ -34,7 +34,8 @@ const ensureDownloadHeaders = async (refererUrl) => {
         },
         condition: {
           regexFilter: 'https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|bilivideo\\.cn|hdslb\\.com)\\/',
-          resourceTypes: ['xmlhttprequest', 'media', 'other']
+          resourceTypes: ['xmlhttprequest'],
+          initiatorDomains: ['www.bilibili.com']
         }
       }]
     });
@@ -246,15 +247,25 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   if (!delta || delta.id == null) return;
   if (delta.state && (delta.state.current === 'interrupted' || delta.state.current === 'complete')) {
     const meta = downloadMetaById.get(delta.id);
-    if (!meta) return;
-    downloadMetaById.delete(delta.id);
-    const items = await chrome.downloads.search({ id: delta.id });
-    const item = items && items[0];
-    if (delta.state.current === 'interrupted') {
-      const msgText = item && item.error ? `下载失败(${item.error})` : '下载失败';
-      if (meta.tabId != null) {
-        chrome.tabs.sendMessage(meta.tabId, { action: 'DOWNLOAD_FAILED', message: msgText });
+    if (meta) {
+      downloadMetaById.delete(delta.id);
+      const items = await chrome.downloads.search({ id: delta.id });
+      const item = items && items[0];
+      if (delta.state.current === 'interrupted') {
+        const msgText = item && item.error ? `下载失败(${item.error})` : '下载失败';
+        if (meta.tabId != null) {
+          chrome.tabs.sendMessage(meta.tabId, { action: 'DOWNLOAD_FAILED', message: msgText });
+        }
       }
+    }
+    // Clean up dynamic DNR rule after downloads finish — prevents interference with live streaming
+    if (!downloadMetaById.size) {
+      setTimeout(async () => {
+        try {
+          await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: [DYNAMIC_RULE_ID] });
+          log('Dynamic DNR rule cleaned up');
+        } catch (_) {}
+      }, 3000);
     }
   }
 });
