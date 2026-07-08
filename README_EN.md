@@ -91,6 +91,9 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.9 (2026-06-29)
+- **Fix**: Extension was causing Bilibili live streaming to fail (status 92002). Fixed declarativeNetRequest rules that were incorrectly intercepting live CDN requests and video media requests.
+
 ### v1.2.8 (2026-06-29)
 - **Optimization**: Merge threshold now dynamically adapts to device memory (4GB→500MB / 8GB→800MB / 16GB→1.2GB / 32GB+→1.8GB).
 - **Optimization**: Added HEAD request pre-check + Content-Length early-abort in download — three-layer protection ensures no wasted download time on oversized files.
