@@ -33,8 +33,7 @@ const ensureDownloadHeaders = async (refererUrl) => {
           ]
         },
         condition: {
-          regexFilter: 'https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|bilivideo\\.cn|hdslb\\.com)\\/',
-          resourceTypes: ['xmlhttprequest', 'other']
+          regexFilter: 'https:\\/\\/(?:[^\\/]*\\.)?(bilivideo\\.com|bilivideo\\.cn|hdslb\\.com)\\/'
         }
       }]
     });
