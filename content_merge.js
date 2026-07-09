@@ -92,16 +92,19 @@
       el.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;background:rgba(0,0,0,0.85);color:#fff;font:14px/1.6 system-ui,sans-serif;padding:16px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);min-width:260px;max-width:360px;user-select:none;cursor:move;";
 
       let isDrag = false, sx, sy, il, it;
-      el.addEventListener("mousedown", e => {
+      const onMouseDown = e => {
         if (e.target.tagName === "BUTTON") return;
         isDrag = true; sx = e.clientX; sy = e.clientY;
         const r = el.getBoundingClientRect(); il = r.left; it = r.top;
         el.style.right = "auto"; el.style.bottom = "auto";
         el.style.left = il + "px"; el.style.top = it + "px";
         e.preventDefault();
-      });
-      window.addEventListener("mousemove", e => { if (!isDrag) return; el.style.left = (il + e.clientX - sx) + "px"; el.style.top = (it + e.clientY - sy) + "px"; });
-      window.addEventListener("mouseup", () => isDrag = false);
+      };
+      const onMouseMove = e => { if (!isDrag) return; el.style.left = (il + e.clientX - sx) + "px"; el.style.top = (it + e.clientY - sy) + "px"; };
+      const onMouseUp = () => isDrag = false;
+      el.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
 
       const titleDiv = document.createElement("div");
       titleDiv.style.cssText = "font-weight:bold;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:4px;";
@@ -134,11 +137,14 @@
         return b;
       };
 
-      const cancelBtn = mkBtn(T.cancel, "#ff6b6b", () => { if (confirm(T.confirmCancel)) { controller.abort(); el.remove(); } });
+      const cancelBtn = mkBtn(T.cancel, "#ff6b6b", () => { if (confirm(T.confirmCancel)) { controller.abort(); my.remove(); } });
       btnArea.appendChild(cancelBtn);
       document.body.appendChild(el);
 
+      const my = {};
+      my.remove = () => { window.removeEventListener("mousemove", onMouseMove); window.removeEventListener("mouseup", onMouseUp); try { el.remove(); } catch (_) {} };
       return {
+        remove: () => my.remove(),
         setStep: t => { stepDiv.textContent = t; },
         setProgress: p => { barDiv.style.width = Math.max(0, Math.min(100, p)) + "%"; },
         setDetail: t => { detailDiv.textContent = t; },
@@ -151,14 +157,13 @@
         done: () => {
           cancelBtn.textContent = T.close;
           cancelBtn.style.cssText = "background:transparent;border:none;color:#fff;cursor:pointer;font-size:12px;padding:0;text-decoration:none;";
-          cancelBtn.onclick = () => el.remove();
+          cancelBtn.onclick = () => my.remove();
         },
         resetCancel: () => {
           cancelBtn.textContent = T.cancel;
           cancelBtn.style.cssText = "background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
-          cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); el.remove(); } };
-        },
-        remove: () => el.remove()
+          cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); my.remove(); } };
+        }
       };
     })();
 
