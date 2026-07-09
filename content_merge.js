@@ -932,7 +932,7 @@
     // Unified split download — handles all scenarios
     const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName) => {
       overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-      // Video — prefer fileHandle (already obtained from showSaveFilePicker)
+      // Video — prefer fileHandle (already obtained from showSaveFilePicker), stream to disk
       if (vData) {
         (async () => {
           try {
@@ -951,14 +951,13 @@
             try {
               console.log('[Split] Fetching video URL:', url.substring(0, 120));
               const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
-              console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok);
-              if (!res.ok) continue;
-              const buf = await res.arrayBuffer();
-              console.log('[Split] Video fetched:', Math.round(buf.byteLength/1024/1024), 'MB, writing to handle...');
+              console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok, 'size:', Math.round(Number(res.headers.get('content-length')||0)/1024/1024), 'MB');
+              if (!res.ok || !res.body) continue;
+              // Stream directly to disk — no ArrayBuffer, no OOM
               const w = await fileHandle.createWritable();
-              await w.write(new Uint8Array(buf));
+              await res.body.pipeTo(w);
               await w.close();
-              console.log('[Split] Video saved via handle OK');
+              console.log('[Split] Video streamed to handle OK');
               return;
             } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
           }
