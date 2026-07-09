@@ -557,10 +557,10 @@
     // ============================================================
     const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
       if (!window.showSaveFilePicker) {
-        // Fallback: fetch and save via blob URL
-        fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
-        setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
+        // Fallback: blob URL download for both (no file handle)
         overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+        fetchToBlob(vAllUrls, `${T.video}-${filename}.mp4`);
+        setTimeout(() => fetchToBlob(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
         return;
       }
 
@@ -640,9 +640,7 @@
         overlay.setStep(T.bigFile);
         overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-          fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
-          setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
+          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
         } else {
           overlay.remove();
         }
@@ -829,9 +827,7 @@
           console.warn("[SizeCheck] fetchBin aborted early:", e.message);
           overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
           if (confirm(T.bigFileConfirm)) {
-            overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-            fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
-            setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
+            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
           } else {
             overlay.remove();
           }
@@ -841,9 +837,7 @@
         overlay.setStep(T.errTitle);
         overlay.setDetail("下载失败，是否尝试分别下载？");
         if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || "下载失败"))) {
-          overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-          fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
-          setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
+          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
         } else {
           overlay.remove();
         }
@@ -857,9 +851,7 @@
         console.log("[SizeCheck] Actual size", Math.round(actualTotalSize/1024/1024), "MB exceeds threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB → split");
         overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-          saveFile(vBin, `${T.video}-${filename}.mp4`);
-          setTimeout(() => saveFile(aBin, `${T.audio}-${filename}.m4a`), 500);
+          doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
         } else {
           overlay.remove();
         }
@@ -902,56 +894,77 @@
       const isOOM = /Array buffer allocation|out of memory|Cannot allocate/i.test(String(ffmpegError?.message || ''));
       overlay.setDetail(isOOM ? "内存不足，无法合并。请分别下载视频和音频。" : "合并失败，是否分别下载视频和音频？");
       if (confirm(T.mergeFailConfirm.replace("{msg}", isOOM ? "内存不足" : "合并过程出错"))) {
-        overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-        saveFile(vBin, `${T.video}-${filename}.mp4`);
-        setTimeout(() => saveFile(aBin, `${T.audio}-${filename}.m4a`), 500);
+        doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
       } else {
         overlay.remove();
       }
     };
 
-    // Save binary data directly via blob URL — bypasses chrome.downloads.download (which lacks proper headers)
-    const saveFile = (data, suggestedName) => {
-      try {
-        const blob = new Blob([data], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = suggestedName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-        console.log('[SaveFile] Saved:', suggestedName, 'size:', data.byteLength);
-      } catch (e) {
-        console.error('[SaveFile] Failed:', e);
-      }
+    // Download via blob URL — works for small files (<500MB), no user gesture needed
+    const saveBlob = (data, suggestedName) => {
+      console.log('[SaveBlob] Creating:', suggestedName, Math.round(data.byteLength/1024/1024), 'MB');
+      const blob = new Blob([data], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none'; a.href = url; a.download = suggestedName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch (_) {} }, 120000);
+      console.log('[SaveBlob] Triggered:', suggestedName);
     };
 
-    // Fetch from URL and save — uses fetch (gets proper headers via DNR rules for xmlhttprequest)
-    const fetchAndSaveFile = async (urls, suggestedName) => {
+    // Fetch URL(s) into blob (uses DNR rules for xmlhttprequest, gets proper Referer)
+    const fetchToBlob = async (urls, name) => {
       if (!Array.isArray(urls)) urls = [urls];
-      let lastErr;
       for (const url of urls) {
         try {
-          console.log('[FetchSave] Trying:', url);
-          const res = await fetch(url, {
-            credentials: 'include',
-            referrer: location.href,
-            referrerPolicy: 'strict-origin-when-cross-origin',
-            signal
-          });
-          if (!res.ok) throw new Error('HTTP ' + res.status);
+          console.log('[FetchBlob] Fetching:', url);
+          const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+          if (!res.ok) continue;
           const buf = await res.arrayBuffer();
-          const data = new Uint8Array(buf);
-          saveFile(data, suggestedName);
+          saveBlob(new Uint8Array(buf), name);
           return;
-        } catch (e) {
-          lastErr = e;
-          console.warn('[FetchSave] URL failed:', e);
-        }
+        } catch (e) { console.warn('[FetchBlob] URL failed:', e); }
       }
-      console.error('[FetchSave] All URLs failed:', lastErr);
+      console.error('[FetchBlob] All URLs failed for:', name);
+    };
+
+    // Unified split download — handles all scenarios
+    // vData/aData: pre-fetched binary data (null if needs fetching)
+    // vUrls/aUrls: CDN URLs for fetching (used when data is null)
+    // vName/aName: suggested filenames
+    const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName) => {
+      overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+      // Video: write to fileHandle (File System API, reliable), fallback to blob
+      if (vData) {
+        (async () => {
+          try { const w = await fileHandle.createWritable(); await w.write(vData); await w.close(); console.log('[Split] Video saved via handle'); } catch (_) {}
+        })();
+      } else {
+        (async () => {
+          try {
+            const ok = await (async () => {
+              for (const url of (Array.isArray(vUrls) ? vUrls : [vUrls])) {
+                try {
+                  const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+                  if (!res.ok) continue;
+                  const buf = await res.arrayBuffer();
+                  const w = await fileHandle.createWritable(); await w.write(new Uint8Array(buf)); await w.close();
+                  console.log('[Split] Video fetched + saved via handle');
+                  return true;
+                } catch (e) { console.warn('[Split] Video URL failed:', e); }
+              }
+              return false;
+            })();
+            if (!ok) fetchToBlob(vUrls, vName); // Fallback: blob download
+          } catch (_) { fetchToBlob(vUrls, vName); }
+        })();
+      }
+      // Audio: always small enough for blob URL
+      setTimeout(() => {
+        if (aData) saveBlob(aData, aName);
+        else fetchToBlob(aUrls, aName);
+      }, 500);
     };
 
     window.addEventListener("BILI_DOWNLOAD_ERROR", e => {
@@ -1045,9 +1058,7 @@
       overlay.setStep(T.errTitle);
       overlay.setDetail(e?.message || T.dlFail);
       if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || ""))) {
-        overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-        fetchAndSaveFile(vAllUrls, `${T.video}-${fname}.mp4`);
-        setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${fname}.m4a`), 500);
+        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${fname}.mp4`, `${T.audio}-${fname}.m4a`);
       }
       overlay.done();
     }
