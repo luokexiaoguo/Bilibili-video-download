@@ -901,7 +901,7 @@
     };
 
     // Download via blob URL — works for small files (<500MB), no user gesture needed
-    const saveBlob = (data, suggestedName) => {
+    const saveBlob = (data, suggestedName, callback) => {
       console.log('[SaveBlob] Creating:', suggestedName, Math.round(data.byteLength/1024/1024), 'MB');
       const blob = new Blob([data], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
@@ -911,55 +911,61 @@
       a.click();
       setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch (_) {} }, 120000);
       console.log('[SaveBlob] Triggered:', suggestedName);
+      if (callback) callback();
     };
 
     // Fetch URL(s) into blob (uses DNR rules for xmlhttprequest, gets proper Referer)
-    const fetchToBlob = async (urls, name) => {
+    const fetchToBlob = async (urls, name, onDone) => {
       if (!Array.isArray(urls)) urls = [urls];
       for (const url of urls) {
         try {
           console.log('[FetchBlob] Fetching:', url);
+          const total = Number((await fetch(url, { method: 'HEAD', credentials: 'include', referrer: location.href })).headers.get('content-length')) || 0;
           const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
           if (!res.ok) continue;
           const buf = await res.arrayBuffer();
-          saveBlob(new Uint8Array(buf), name);
+          saveBlob(new Uint8Array(buf), name, onDone);
           return;
         } catch (e) { console.warn('[FetchBlob] URL failed:', e); }
       }
       console.error('[FetchBlob] All URLs failed for:', name);
+      if (onDone) onDone();
     };
 
     // Stream with progress — pipes fetch body to file handle with overlay progress updates
+    let _lastProgressUpdate = 0;
     const streamWithProgress = async (res, writable, label, totalSize) => {
       const reader = res.body.getReader();
       const start = performance.now();
       let loaded = 0;
       const chunks = [];
-      // Read in chunks, write to writable, update overlay
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         loaded += value.length;
         chunks.push(value);
-        // Flush to writable every ~64MB to avoid too many small writes
         if (chunks.reduce((s, c) => s + c.length, 0) > 64 * 1024 * 1024) {
           const merged = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
           let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length; }
           chunks.length = 0;
           await writable.write(merged);
         }
-        // Update progress
-        const elapsed = Math.max(0.1, (performance.now() - start) / 1000);
-        const pct = totalSize ? Math.round(loaded / totalSize * 100) : 0;
-        overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(totalSize)} (${fmtBytes(loaded/elapsed)}/s)${pct ? ' ' + pct + '%' : ''}`);
+        const now = performance.now();
+        if (now - _lastProgressUpdate > 200) {
+          _lastProgressUpdate = now;
+          const elapsed = Math.max(0.1, (now - start) / 1000);
+          const pct = totalSize ? Math.round(loaded / totalSize * 100) : 0;
+          overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(totalSize)} (${fmtBytes(loaded/elapsed)}/s) ${pct}%`);
+        }
       }
-      // Flush remaining
       if (chunks.length > 0) {
         const merged = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
         let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length; }
         await writable.write(merged);
       }
       await writable.close();
+      // Final progress update
+      overlay.setDetail(`${label}: 完成 ✓ (${fmtBytes(loaded)})`);
     };
 
     // Unified split download — handles all scenarios
@@ -1001,16 +1007,17 @@
           fetchToBlob(vUrls, vName);
         })();
       }
-      // Audio — small, with progress
+      // Audio — small, with progress + completion callback
       setTimeout(() => {
+        const audioDone = () => { overlay.setDetail(`${T.audio}: 完成 ✓`); };
         if (aData) {
           console.log('[Split] Saving audio from memory:', Math.round(aData.byteLength/1024/1024), 'MB');
           overlay.setDetail(`${T.audio}: 保存中... ${fmtBytes(aData.byteLength)}`);
-          saveBlob(aData, aName);
+          saveBlob(aData, aName, audioDone);
         } else {
           console.log('[Split] Fetching audio...');
           overlay.setDetail(`${T.audio}: 下载中...`);
-          fetchToBlob(aUrls, aName);
+          fetchToBlob(aUrls, aName, audioDone);
         }
       }, 500);
     };
