@@ -991,7 +991,16 @@
           for (const url of urls) {
             try {
               console.log('[Split] Fetching video URL:', url.substring(0, 120));
-              const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
+              let res;
+              try {
+                res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
+                if (res?.status === 403 || !res?.ok) {
+                  console.log('[Split] 403 with credentials, retrying without...');
+                  res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin' });
+                }
+              } catch (e) {
+                res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin' });
+              }
               const total = Number(res.headers.get('content-length')) || 0;
               console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok, 'size:', Math.round(total/1024/1024), 'MB');
               if (!res.ok || !res.body) continue;
