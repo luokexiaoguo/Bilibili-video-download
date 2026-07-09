@@ -573,7 +573,7 @@
       let fileHandle;
       try {
         fileHandle = await window.showSaveFilePicker({
-          suggestedName: filename + ".mp4",
+          suggestedName: `${T.video}-${filename}.mp4`,
           types: [{ description: 'MP4', accept: {'video/mp4': ['.mp4']} }]
         });
       } catch (e) {
