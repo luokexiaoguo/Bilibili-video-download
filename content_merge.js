@@ -1027,7 +1027,8 @@
               return;
             } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
           }
-          fetchToBlob(vUrls, vName);
+          _prog.v = `${T.video}: 所有 URL 失败`;
+          _updateDetail();
         })();
       }
       // Audio — progress shown in shared display alongside video
