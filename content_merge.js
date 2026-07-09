@@ -557,9 +557,10 @@
     // ============================================================
     const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
       if (!window.showSaveFilePicker) {
-        // Fallback: download via service worker (separate files)
-        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
-        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+        // Fallback: fetch and save via blob URL
+        fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
+        setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
+        overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
         return;
       }
 
@@ -639,8 +640,9 @@
         overlay.setStep(T.bigFile);
         overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
-          setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+          overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+          fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
+          setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
         } else {
           overlay.remove();
         }
@@ -825,23 +827,23 @@
         // FILE_TOO_LARGE: Content-Length header already exceeds threshold → split immediately
         if (String(e?.message || '').startsWith('FILE_TOO_LARGE:')) {
           console.warn("[SizeCheck] fetchBin aborted early:", e.message);
-          overlay.setStep(T.bigFile);
-          overlay.setDetail(T.bigFileDetail);
+          overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
           if (confirm(T.bigFileConfirm)) {
-            triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
-            setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+            overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+            fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
+            setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
           } else {
             overlay.remove();
           }
           return;
         }
         console.error("[BiliDown] Fetch failed, falling back to separate download:", e);
-        // If fetch failed, fall back to separate download via service worker
         overlay.setStep(T.errTitle);
         overlay.setDetail("下载失败，是否尝试分别下载？");
         if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || "下载失败"))) {
-          triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
-          setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+          overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+          fetchAndSaveFile(vAllUrls, `${T.video}-${filename}.mp4`);
+          setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
         } else {
           overlay.remove();
         }
@@ -853,11 +855,11 @@
       const actualTotalSize = vBin.byteLength + aBin.byteLength;
       if (actualTotalSize > MAX_SIZE_FOR_MERGE) {
         console.log("[SizeCheck] Actual size", Math.round(actualTotalSize/1024/1024), "MB exceeds threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB → split");
-        overlay.setStep(T.bigFile);
-        overlay.setDetail(T.bigFileDetail);
+        overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
-          setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+          overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+          saveFile(vBin, `${T.video}-${filename}.mp4`);
+          setTimeout(() => saveFile(aBin, `${T.audio}-${filename}.m4a`), 500);
         } else {
           overlay.remove();
         }
@@ -895,24 +897,61 @@
         var ffmpegError = e;
       }
 
-      // If merge failed, offer separate download via service worker
+      // If merge failed, offer separate download via blob URL (data already in memory)
       overlay.setStep(T.errTitle);
       const isOOM = /Array buffer allocation|out of memory|Cannot allocate/i.test(String(ffmpegError?.message || ''));
       overlay.setDetail(isOOM ? "内存不足，无法合并。请分别下载视频和音频。" : "合并失败，是否分别下载视频和音频？");
       if (confirm(T.mergeFailConfirm.replace("{msg}", isOOM ? "内存不足" : "合并过程出错"))) {
-        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${filename}.mp4` });
-        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${filename}.m4a` }), 1000);
+        overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+        saveFile(vBin, `${T.video}-${filename}.mp4`);
+        setTimeout(() => saveFile(aBin, `${T.audio}-${filename}.m4a`), 500);
       } else {
         overlay.remove();
       }
     };
 
-    const triggerBgDownload = payload => {
-      overlay.setStep(T.browserDl);
-      overlay.setProgress(100);
-      overlay.setDetail(T.browserDlDetail);
-      overlay.done();
-      window.dispatchEvent(new CustomEvent("BILI_TRIGGER_DOWNLOAD", { detail: payload }));
+    // Save binary data directly via blob URL — bypasses chrome.downloads.download (which lacks proper headers)
+    const saveFile = (data, suggestedName) => {
+      try {
+        const blob = new Blob([data], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = suggestedName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        console.log('[SaveFile] Saved:', suggestedName, 'size:', data.byteLength);
+      } catch (e) {
+        console.error('[SaveFile] Failed:', e);
+      }
+    };
+
+    // Fetch from URL and save — uses fetch (gets proper headers via DNR rules for xmlhttprequest)
+    const fetchAndSaveFile = async (urls, suggestedName) => {
+      if (!Array.isArray(urls)) urls = [urls];
+      let lastErr;
+      for (const url of urls) {
+        try {
+          console.log('[FetchSave] Trying:', url);
+          const res = await fetch(url, {
+            credentials: 'include',
+            referrer: location.href,
+            referrerPolicy: 'strict-origin-when-cross-origin',
+            signal
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const buf = await res.arrayBuffer();
+          const data = new Uint8Array(buf);
+          saveFile(data, suggestedName);
+          return;
+        } catch (e) {
+          lastErr = e;
+          console.warn('[FetchSave] URL failed:', e);
+        }
+      }
+      console.error('[FetchSave] All URLs failed:', lastErr);
     };
 
     window.addEventListener("BILI_DOWNLOAD_ERROR", e => {
@@ -1006,8 +1045,9 @@
       overlay.setStep(T.errTitle);
       overlay.setDetail(e?.message || T.dlFail);
       if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || ""))) {
-        triggerBgDownload({ urls: vAllUrls, url: vUrl, filename: `${T.video}-${fname}.mp4` });
-        setTimeout(() => triggerBgDownload({ urls: aAllUrls, url: aUrl, filename: `${T.audio}-${fname}.m4a` }), 1000);
+        overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+        fetchAndSaveFile(vAllUrls, `${T.video}-${fname}.mp4`);
+        setTimeout(() => fetchAndSaveFile(aAllUrls, `${T.audio}-${fname}.m4a`), 500);
       }
       overlay.done();
     }
