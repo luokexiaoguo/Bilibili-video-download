@@ -913,11 +913,12 @@
       if (callback) callback();
     };
 
-    // Fetch URL(s) into blob with progress (video blob fallback)
+    // Fetch URL(s) into blob with progress
     const fetchToBlob = async (urls, name) => {
       if (!Array.isArray(urls)) urls = [urls];
       for (const url of urls) {
         try {
+          overlay.setDetail(`${name}: 下载中...`);
           const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
           if (!res.ok) continue;
           const total = Number(res.headers.get('content-length')) || 0;
@@ -929,13 +930,11 @@
             chunks.push(value); loaded += value.length;
             const elapsed = (performance.now() - start) / 1000;
             const pct = total ? `${Math.round(loaded/total*100)}%` : '';
-            _prog.v = `${name}: ${fmtBytes(loaded)}/${fmtBytes(total)} ${pct}`;
-            _updateDetail();
+            overlay.setDetail(`${name}: ${fmtBytes(loaded)}/${fmtBytes(total)} ${pct}`);
           }
           const buf = new Uint8Array(loaded);
           let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
-          _prog.v = `${name}: 保存中...`;
-          _updateDetail();
+          overlay.setDetail(`${name}: 保存中...`);
           saveBlob(buf, name);
           return;
         } catch (e) { console.warn('[FetchBlob] URL failed:', e); }
@@ -1162,12 +1161,10 @@
       if (e?.name === 'AbortError' || e?.message === 'Aborted') {
         overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return;
       }
-      overlay.setStep(T.errTitle);
-      overlay.setDetail(e?.message || T.dlFail);
-      if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || ""))) {
-        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${fname}.mp4`, `${T.audio}-${fname}.m4a`);
-      }
-      overlay.done();
+      overlay.setStep(T.browserDl); overlay.setProgress(90);
+      overlay.setDetail("分流下载中...");
+      fetchToBlob(vAllUrls, `${T.video}-${fname}.mp4`);
+      setTimeout(() => fetchToBlob(aAllUrls, `${T.audio}-${fname}.m4a`), 500);
     }
 
   } catch(err) {
