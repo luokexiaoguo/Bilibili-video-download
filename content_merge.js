@@ -991,7 +991,9 @@
     const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName, fh) => {
       overlay.setStep(T.browserDl); overlay.setProgress(90);
       _prog.v = ''; _prog.a = '';
-      if (!fh) { console.warn('[Split] No fileHandle, using blob fallback'); saveBlob(vData || new Uint8Array(0), vName || 'fallback.mp4'); return; }
+      let _done = 0;
+      const _checkDone = () => { _done++; if (_done >= 2) { overlay.setProgress(100); overlay.done(); } };
+      if (!fh) { console.warn('[Split] No fileHandle, using blob fallback'); saveBlob(vData || new Uint8Array(0), vName || 'fallback.mp4'); _checkDone(); return; }
       // Video — prefer fileHandle, stream to disk
       if (vData) {
         (async () => {
@@ -1002,7 +1004,7 @@
             await w.write(vData);
             await w.close();
             _prog.v = `${T.video}: ✓`;
-            _updateDetail();
+            _updateDetail(); _checkDone();
           } catch (e) { console.error('[Split] Video handle write FAILED:', e); saveBlob(vData, vName); }
         })();
       } else {
@@ -1025,16 +1027,17 @@
               _prog.v = `${T.video}: 0/${fmtBytes(total)}`;
               _updateDetail();
               await streamWithProgress(res, w, T.video, total);
+              _checkDone();
               return;
             } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
           }
           _prog.v = `${T.video}: 所有 URL 失败`;
-          _updateDetail();
+          _updateDetail(); _checkDone();
         })();
       }
       // Audio — progress shown in shared display alongside video
       setTimeout(() => {
-        const audioDone = () => { _prog.a = `${T.audio}: ✓`; _updateDetail(); };
+        const audioDone = () => { _prog.a = `${T.audio}: ✓`; _updateDetail(); _checkDone(); };
         if (aData) {
           _prog.a = `${T.audio}: 保存中...`;
           _updateDetail();
