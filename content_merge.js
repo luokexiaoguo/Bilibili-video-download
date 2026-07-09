@@ -559,7 +559,7 @@
       if (!window.showSaveFilePicker) {
         // Fallback: blob URL download for both (no file handle)
         overlay.setStep(T.browserDl); overlay.setProgress(90);
-        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
+        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
         return;
       }
 
@@ -639,7 +639,7 @@
         overlay.setStep(T.bigFile);
         overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
+          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
         } else {
           overlay.remove();
         }
@@ -826,7 +826,7 @@
           console.warn("[SizeCheck] fetchBin aborted early:", e.message);
           overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
           if (confirm(T.bigFileConfirm)) {
-            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
+            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
           } else {
             overlay.remove();
           }
@@ -836,7 +836,7 @@
         overlay.setStep(T.errTitle);
         overlay.setDetail("下载失败，是否尝试分别下载？");
         if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || "下载失败"))) {
-          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
+          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
         } else {
           overlay.remove();
         }
@@ -850,7 +850,7 @@
         console.log("[SizeCheck] Actual size", Math.round(actualTotalSize/1024/1024), "MB exceeds threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB → split");
         overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
+          doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
         } else {
           overlay.remove();
         }
@@ -893,7 +893,7 @@
       const isOOM = /Array buffer allocation|out of memory|Cannot allocate/i.test(String(ffmpegError?.message || ''));
       overlay.setDetail(isOOM ? "内存不足，无法合并。请分别下载视频和音频。" : "合并失败，是否分别下载视频和音频？");
       if (confirm(T.mergeFailConfirm.replace("{msg}", isOOM ? "内存不足" : "合并过程出错"))) {
-        doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
+        doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
       } else {
         overlay.remove();
       }
@@ -988,16 +988,17 @@
     };
 
     // Unified split download — handles all scenarios
-    const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName) => {
+    const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName, fh) => {
       overlay.setStep(T.browserDl); overlay.setProgress(90);
       _prog.v = ''; _prog.a = '';
-      // Video — prefer fileHandle (already obtained from showSaveFilePicker), stream to disk
+      if (!fh) { console.warn('[Split] No fileHandle, using blob fallback'); saveBlob(vData || new Uint8Array(0), vName || 'fallback.mp4'); return; }
+      // Video — prefer fileHandle, stream to disk
       if (vData) {
         (async () => {
           try {
             _prog.v = `${T.video}: 写入中... ${fmtBytes(vData.byteLength)}`;
             _updateDetail();
-            const w = await fileHandle.createWritable();
+            const w = await fh.createWritable();
             await w.write(vData);
             await w.close();
             _prog.v = `${T.video}: ✓`;
@@ -1020,7 +1021,7 @@
               }
               const total = Number(res.headers.get('content-length')) || 0;
               if (!res.ok || !res.body) continue;
-              const w = await fileHandle.createWritable();
+              const w = await fh.createWritable();
               _prog.v = `${T.video}: 0/${fmtBytes(total)}`;
               _updateDetail();
               await streamWithProgress(res, w, T.video, total);
