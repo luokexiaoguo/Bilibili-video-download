@@ -56,9 +56,34 @@ FFmpeg.wasm requires SharedArrayBuffer, which needs cross-origin isolation heade
 2. content_merge.js resolves video info via Bilibili APIs
 3. Picks best video track (SDR preferred, HDR if requested) and audio track from DASH manifest
 4. Calls `showSaveFilePicker` IMMEDIATELY (user gesture required, must not be deferred)
-5. Downloads video + audio into memory, merges via FFmpeg.wasm (<1.8GB)
-6. Writes merged MP4 to the file handle obtained in step 4
-7. Falls back to browser download (via service worker) for large files or merge failures
+5. **If file < threshold**: downloads video + audio into memory, merges via FFmpeg.wasm, writes merged MP4 to file handle
+6. **If file > threshold**: streams video directly to file handle via `fetch().body.pipeTo(writable)` (no OOM), audio via blob URL download
+7. Falls back to blob URL download for both tracks if file handle unavailable
+
+### Dynamic Merge Threshold
+
+Merge threshold adapts to device memory to avoid WASM OOM:
+
+```
+4GB RAM  → 500MB    8GB RAM  → 800MB
+16GB RAM → 1.2GB   32GB+ RAM → 1.8GB
+```
+
+Formula: `navigator.deviceMemory` based, with conservative clamping.
+
+### Three-Layer Size Protection
+
+1. **HEAD probe**: Quick `Content-Length` request BEFORE download starts. If size > threshold, offers split immediately — no wasted download.
+2. **Early abort**: When downloading response body, reads `Content-Length` header at stream start. Single track already > threshold → aborts.
+3. **Post-download safety net**: Always checks actual downloaded size against threshold.
+
+### Split Download Streaming
+
+Large files (>threshold) stream video directly to disk, no memory OOM:
+
+- **Video**: Streamed via `fetch()` → `res.body.pipeTo(writable)` — no ArrayBuffer
+- **Audio**: Downloaded via `fetch()` and saved as blob URL (small, <300MB)
+- Combined progress in overlay: `"视频: 1.2GB/8.4GB 15% | 音频: ✓"`
 
 ### URL Pattern Support
 
@@ -85,5 +110,8 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 
 - `rules.json` — `declarativeNetRequest` rules: CORS bypass for CDN domains, CSP removal, COOP/COEP injection for SharedArrayBuffer
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds). If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`
-- `content_merge.js` — Largest file (~900 lines): all download/merge logic, overlay UI, Bilibili API parsing
+- `content_merge.js` — Largest file (~1100 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access
+- `service_worker.js` — Background service worker: DNR dynamic rules, download management
+- `afdian-worker/` — Activation code verification Worker (Cloudflare + Vercel proxy), separate v1.3.0 branch
+- `vercel-api/` — Vercel API proxy for China-stable activation endpoint
