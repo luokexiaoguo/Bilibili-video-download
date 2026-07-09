@@ -930,40 +930,47 @@
     };
 
     // Unified split download — handles all scenarios
-    // vData/aData: pre-fetched binary data (null if needs fetching)
-    // vUrls/aUrls: CDN URLs for fetching (used when data is null)
-    // vName/aName: suggested filenames
     const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName) => {
       overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-      // Video: write to fileHandle (File System API, reliable), fallback to blob
+      // Video — prefer fileHandle (already obtained from showSaveFilePicker)
       if (vData) {
         (async () => {
-          try { const w = await fileHandle.createWritable(); await w.write(vData); await w.close(); console.log('[Split] Video saved via handle'); } catch (_) {}
+          try {
+            console.log('[Split] Writing video to handle:', Math.round(vData.byteLength/1024/1024), 'MB');
+            const w = await fileHandle.createWritable();
+            await w.write(vData);
+            await w.close();
+            console.log('[Split] Video saved via handle OK');
+          } catch (e) { console.error('[Split] Video handle write FAILED:', e); saveBlob(vData, vName); }
         })();
       } else {
         (async () => {
-          try {
-            const ok = await (async () => {
-              for (const url of (Array.isArray(vUrls) ? vUrls : [vUrls])) {
-                try {
-                  const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
-                  if (!res.ok) continue;
-                  const buf = await res.arrayBuffer();
-                  const w = await fileHandle.createWritable(); await w.write(new Uint8Array(buf)); await w.close();
-                  console.log('[Split] Video fetched + saved via handle');
-                  return true;
-                } catch (e) { console.warn('[Split] Video URL failed:', e); }
-              }
-              return false;
-            })();
-            if (!ok) fetchToBlob(vUrls, vName); // Fallback: blob download
-          } catch (_) { fetchToBlob(vUrls, vName); }
+          const urls = Array.isArray(vUrls) ? vUrls : [vUrls];
+          console.log('[Split] Fetching video from', urls.length, 'URLs');
+          for (const url of urls) {
+            try {
+              console.log('[Split] Fetching video URL:', url.substring(0, 120));
+              const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
+              console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok);
+              if (!res.ok) continue;
+              const buf = await res.arrayBuffer();
+              console.log('[Split] Video fetched:', Math.round(buf.byteLength/1024/1024), 'MB, writing to handle...');
+              const w = await fileHandle.createWritable();
+              await w.write(new Uint8Array(buf));
+              await w.close();
+              console.log('[Split] Video saved via handle OK');
+              return;
+            } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
+          }
+          // All URLs failed — try blob fallback
+          console.error('[Split] All video URLs failed, trying blob fallback...');
+          fetchToBlob(vUrls, vName);
         })();
       }
-      // Audio: always small enough for blob URL
+      // Audio — always small enough for blob URL
       setTimeout(() => {
-        if (aData) saveBlob(aData, aName);
-        else fetchToBlob(aUrls, aName);
+        if (aData) { console.log('[Split] Saving audio from memory:', Math.round(aData.byteLength/1024/1024), 'MB'); saveBlob(aData, aName); }
+        else { console.log('[Split] Fetching audio...'); fetchToBlob(aUrls, aName); }
       }, 500);
     };
 
