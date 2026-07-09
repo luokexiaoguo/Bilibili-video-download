@@ -929,17 +929,52 @@
       console.error('[FetchBlob] All URLs failed for:', name);
     };
 
+    // Stream with progress — pipes fetch body to file handle with overlay progress updates
+    const streamWithProgress = async (res, writable, label, totalSize) => {
+      const reader = res.body.getReader();
+      const start = performance.now();
+      let loaded = 0;
+      const chunks = [];
+      // Read in chunks, write to writable, update overlay
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        loaded += value.length;
+        chunks.push(value);
+        // Flush to writable every ~64MB to avoid too many small writes
+        if (chunks.reduce((s, c) => s + c.length, 0) > 64 * 1024 * 1024) {
+          const merged = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+          let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length; }
+          chunks.length = 0;
+          await writable.write(merged);
+        }
+        // Update progress
+        const elapsed = Math.max(0.1, (performance.now() - start) / 1000);
+        const pct = totalSize ? Math.round(loaded / totalSize * 100) : 0;
+        overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(totalSize)} (${fmtBytes(loaded/elapsed)}/s)${pct ? ' ' + pct + '%' : ''}`);
+      }
+      // Flush remaining
+      if (chunks.length > 0) {
+        const merged = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+        let off = 0; for (const c of chunks) { merged.set(c, off); off += c.length; }
+        await writable.write(merged);
+      }
+      await writable.close();
+    };
+
     // Unified split download — handles all scenarios
     const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName) => {
-      overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
+      overlay.setStep(T.browserDl); overlay.setProgress(90);
       // Video — prefer fileHandle (already obtained from showSaveFilePicker), stream to disk
       if (vData) {
         (async () => {
           try {
+            overlay.setDetail(`${T.video}: 写入中... ${fmtBytes(vData.byteLength)}`);
             console.log('[Split] Writing video to handle:', Math.round(vData.byteLength/1024/1024), 'MB');
             const w = await fileHandle.createWritable();
             await w.write(vData);
             await w.close();
+            overlay.setDetail(`${T.video}: 完成 ✓`);
             console.log('[Split] Video saved via handle OK');
           } catch (e) { console.error('[Split] Video handle write FAILED:', e); saveBlob(vData, vName); }
         })();
@@ -951,25 +986,32 @@
             try {
               console.log('[Split] Fetching video URL:', url.substring(0, 120));
               const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
-              console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok, 'size:', Math.round(Number(res.headers.get('content-length')||0)/1024/1024), 'MB');
+              const total = Number(res.headers.get('content-length')) || 0;
+              console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok, 'size:', Math.round(total/1024/1024), 'MB');
               if (!res.ok || !res.body) continue;
-              // Stream directly to disk — no ArrayBuffer, no OOM
               const w = await fileHandle.createWritable();
-              await res.body.pipeTo(w);
-              await w.close();
+              overlay.setDetail(`${T.video}: 下载中... 0 / ${fmtBytes(total)}`);
+              await streamWithProgress(res, w, T.video, total);
+              overlay.setDetail(`${T.video}: 完成 ✓ (${fmtBytes(total)})`);
               console.log('[Split] Video streamed to handle OK');
               return;
             } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
           }
-          // All URLs failed — try blob fallback
           console.error('[Split] All video URLs failed, trying blob fallback...');
           fetchToBlob(vUrls, vName);
         })();
       }
-      // Audio — always small enough for blob URL
+      // Audio — small, with progress
       setTimeout(() => {
-        if (aData) { console.log('[Split] Saving audio from memory:', Math.round(aData.byteLength/1024/1024), 'MB'); saveBlob(aData, aName); }
-        else { console.log('[Split] Fetching audio...'); fetchToBlob(aUrls, aName); }
+        if (aData) {
+          console.log('[Split] Saving audio from memory:', Math.round(aData.byteLength/1024/1024), 'MB');
+          overlay.setDetail(`${T.audio}: 保存中... ${fmtBytes(aData.byteLength)}`);
+          saveBlob(aData, aName);
+        } else {
+          console.log('[Split] Fetching audio...');
+          overlay.setDetail(`${T.audio}: 下载中...`);
+          fetchToBlob(aUrls, aName);
+        }
       }, 500);
     };
 
