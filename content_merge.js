@@ -558,9 +558,8 @@
     const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
       if (!window.showSaveFilePicker) {
         // Fallback: blob URL download for both (no file handle)
-        overlay.setStep(T.browserDl); overlay.setProgress(100); overlay.setDetail(T.browserDlDetail); overlay.done();
-        fetchToBlob(vAllUrls, `${T.video}-${filename}.mp4`);
-        setTimeout(() => fetchToBlob(aAllUrls, `${T.audio}-${filename}.m4a`), 500);
+        overlay.setStep(T.browserDl); overlay.setProgress(90);
+        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`);
         return;
       }
 
@@ -914,22 +913,42 @@
       if (callback) callback();
     };
 
-    // Fetch URL(s) into blob (uses DNR rules for xmlhttprequest, gets proper Referer)
-    const fetchToBlob = async (urls, name, onDone) => {
+    // Fetch URL(s) into blob with progress (video blob fallback)
+    const fetchToBlob = async (urls, name) => {
       if (!Array.isArray(urls)) urls = [urls];
       for (const url of urls) {
         try {
-          console.log('[FetchBlob] Fetching:', url);
-          const total = Number((await fetch(url, { method: 'HEAD', credentials: 'include', referrer: location.href })).headers.get('content-length')) || 0;
           const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
           if (!res.ok) continue;
-          const buf = await res.arrayBuffer();
-          saveBlob(new Uint8Array(buf), name, onDone);
+          const total = Number(res.headers.get('content-length')) || 0;
+          const reader = res.body.getReader();
+          const chunks = []; let loaded = 0; const start = performance.now();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value); loaded += value.length;
+            const elapsed = (performance.now() - start) / 1000;
+            const pct = total ? `${Math.round(loaded/total*100)}%` : '';
+            _prog.v = `${name}: ${fmtBytes(loaded)}/${fmtBytes(total)} ${pct}`;
+            _updateDetail();
+          }
+          const buf = new Uint8Array(loaded);
+          let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+          _prog.v = `${name}: 保存中...`;
+          _updateDetail();
+          saveBlob(buf, name);
           return;
         } catch (e) { console.warn('[FetchBlob] URL failed:', e); }
       }
-      console.error('[FetchBlob] All URLs failed for:', name);
-      if (onDone) onDone();
+    };
+
+    // Shared progress state — video + audio combined into one overlay line
+    const _prog = { v: '', a: '' };
+    const _updateDetail = () => {
+      let line = '';
+      if (_prog.v) line += _prog.v;
+      if (_prog.a) line += (line ? ' | ' : '') + _prog.a;
+      overlay.setDetail(line || '下载中...');
     };
 
     // Stream with progress — pipes fetch body to file handle with overlay progress updates
@@ -955,7 +974,8 @@
           _lastProgressUpdate = now;
           const elapsed = Math.max(0.1, (now - start) / 1000);
           const pct = totalSize ? Math.round(loaded / totalSize * 100) : 0;
-          overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(totalSize)} (${fmtBytes(loaded/elapsed)}/s) ${pct}%`);
+          _prog.v = `${label}: ${fmtBytes(loaded)}/${fmtBytes(totalSize)} (${fmtBytes(loaded/elapsed)}/s) ${pct}%`;
+          _updateDetail();
         }
       }
       if (chunks.length > 0) {
@@ -964,69 +984,92 @@
         await writable.write(merged);
       }
       await writable.close();
-      // Final progress update
-      overlay.setDetail(`${label}: 完成 ✓ (${fmtBytes(loaded)})`);
+      _prog.v = `${label}: ✓ ${fmtBytes(loaded)}`;
+      _updateDetail();
     };
 
     // Unified split download — handles all scenarios
     const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName) => {
       overlay.setStep(T.browserDl); overlay.setProgress(90);
+      _prog.v = ''; _prog.a = '';
       // Video — prefer fileHandle (already obtained from showSaveFilePicker), stream to disk
       if (vData) {
         (async () => {
           try {
-            overlay.setDetail(`${T.video}: 写入中... ${fmtBytes(vData.byteLength)}`);
-            console.log('[Split] Writing video to handle:', Math.round(vData.byteLength/1024/1024), 'MB');
+            _prog.v = `${T.video}: 写入中... ${fmtBytes(vData.byteLength)}`;
+            _updateDetail();
             const w = await fileHandle.createWritable();
             await w.write(vData);
             await w.close();
-            overlay.setDetail(`${T.video}: 完成 ✓`);
-            console.log('[Split] Video saved via handle OK');
+            _prog.v = `${T.video}: ✓`;
+            _updateDetail();
           } catch (e) { console.error('[Split] Video handle write FAILED:', e); saveBlob(vData, vName); }
         })();
       } else {
         (async () => {
           const urls = Array.isArray(vUrls) ? vUrls : [vUrls];
-          console.log('[Split] Fetching video from', urls.length, 'URLs');
           for (const url of urls) {
             try {
-              console.log('[Split] Fetching video URL:', url.substring(0, 120));
               let res;
               try {
                 res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
                 if (res?.status === 403 || !res?.ok) {
-                  console.log('[Split] 403 with credentials, retrying without...');
                   res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin' });
                 }
               } catch (e) {
                 res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin' });
               }
               const total = Number(res.headers.get('content-length')) || 0;
-              console.log('[Split] Video fetch status:', res.status, 'ok:', res.ok, 'size:', Math.round(total/1024/1024), 'MB');
               if (!res.ok || !res.body) continue;
               const w = await fileHandle.createWritable();
-              overlay.setDetail(`${T.video}: 下载中... 0 / ${fmtBytes(total)}`);
+              _prog.v = `${T.video}: 0/${fmtBytes(total)}`;
+              _updateDetail();
               await streamWithProgress(res, w, T.video, total);
-              overlay.setDetail(`${T.video}: 完成 ✓ (${fmtBytes(total)})`);
-              console.log('[Split] Video streamed to handle OK');
               return;
             } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
           }
-          console.error('[Split] All video URLs failed, trying blob fallback...');
           fetchToBlob(vUrls, vName);
         })();
       }
-      // Audio — small, with progress + completion callback
+      // Audio — progress shown in shared display alongside video
       setTimeout(() => {
-        const audioDone = () => { overlay.setDetail(`${T.audio}: 完成 ✓`); };
+        const audioDone = () => { _prog.a = `${T.audio}: ✓`; _updateDetail(); };
         if (aData) {
-          console.log('[Split] Saving audio from memory:', Math.round(aData.byteLength/1024/1024), 'MB');
-          overlay.setDetail(`${T.audio}: 保存中... ${fmtBytes(aData.byteLength)}`);
+          _prog.a = `${T.audio}: 保存中...`;
+          _updateDetail();
           saveBlob(aData, aName, audioDone);
         } else {
-          console.log('[Split] Fetching audio...');
-          overlay.setDetail(`${T.audio}: 下载中...`);
-          fetchToBlob(aUrls, aName, audioDone);
+          if (!Array.isArray(aUrls)) aUrls = [aUrls];
+          _prog.a = `${T.audio}: 下载中...`;
+          _updateDetail();
+          // fetchToBlob with progress writing to _prog.a
+          (async () => {
+            for (const url of aUrls) {
+              try {
+                const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
+                if (!res.ok) continue;
+                const total = Number(res.headers.get('content-length')) || 0;
+                const reader = res.body.getReader();
+                const chunks = []; let loaded = 0; const start = performance.now();
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  chunks.push(value); loaded += value.length;
+                  const elapsed = (performance.now() - start) / 1000;
+                  const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
+                  _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
+                  _updateDetail();
+                }
+                const buf = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+                let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+                _prog.a = `${T.audio}: 触发下载...`;
+                _updateDetail();
+                saveBlob(buf, aName, audioDone);
+                return;
+              } catch (e) { console.warn('[Audio] URL failed:', e); }
+            }
+            audioDone();
+          })();
         }
       }, 500);
     };
