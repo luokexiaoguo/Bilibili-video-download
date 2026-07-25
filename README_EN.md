@@ -91,6 +91,21 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.11 (2026-07-25)
+- **Fix**: Fixed CORS header override causing CDN request rejections for some videos.
+- **Optimization**: Simplified DNR rules to only keep essential header modifications.
+
+### v1.2.10 (2026-07-09)
+- **Fix**: Large video merge OOM — switched to streaming write to disk.
+- **Fix**: Live streaming playback broken (status 92002).
+- **Fix**: Split download "no permission" CDN 403 error.
+- **Fix**: Progress bar stuck at 90%.
+- **Fix**: Progress display flickering.
+- **Fix**: Memory leak from repeated downloads.
+- **Optimization**: Dynamic merge threshold based on device memory.
+- **Optimization**: Pre-download HEAD probe for instant split decision.
+- **Optimization**: Multi-level CDN fallback (credentials retry + domain retry), higher success rate.
+
 ### v1.2.9 (2026-06-29)
 - **Fix**: Extension was causing Bilibili live streaming to fail (status 92002). Fixed declarativeNetRequest rules that were incorrectly intercepting live CDN requests and video media requests.
 
