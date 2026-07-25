@@ -112,16 +112,15 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 | # | Action | Resource Types | Purpose |
 |---|--------|---------------|---------|
 | 1001 | Set `Referer` + remove `Origin` | `xmlhttprequest`, `other` | Ensures CDN requests have proper Referer. CRITICAL for downloads. |
+| 1002 | Set `Access-Control-Allow-Origin: *` | `xmlhttprequest`, `other` | Ensures CDN responses have CORS headers (some CDN nodes return empty/invalid). Uses `*` to avoid origin mismatch. |
 | 1003 | Remove `Content-Security-Policy` | `main_frame`, `sub_frame` | Enables FFmpeg.wasm without CSP restrictions |
 | 1004 | Set `Cross-Origin-Opener-Policy` + `Cross-Origin-Embedder-Policy` | `main_frame` | Enables `SharedArrayBuffer` for FFmpeg MT mode |
-
-**Removed**: Rule 1002 (CORS header override) was removed in v1.2.11 — CDN already returns correct `Access-Control-Allow-Origin: *`. The override caused CORS origin mismatch errors.
 
 **Note**: Dynamic DNR rule (ID 20001, service worker) is deprecated. All downloads now use `fetch()` which respects static rules.
 
 ## Important Files
 
-- `rules.json` — DNR rules: Referer injection, CSP removal, COOP/COEP for SharedArrayBuffer. Only 3 active rules.
+- `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. Only 3 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds). If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`
 - `content_merge.js` — Largest file (~1100 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
