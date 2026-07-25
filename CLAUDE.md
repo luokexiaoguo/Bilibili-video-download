@@ -32,7 +32,7 @@ popup.html/popup.js  →  content_bridge.js (ISOLATED world)  ↔  service_worke
 
 | Event | Direction | Purpose |
 |-------|-----------|---------|
-| `BILI_TRIGGER_DOWNLOAD` | MAIN→ISOLATED | Request browser download via service worker |
+| `BILI_TRIGGER_DOWNLOAD` | MAIN→ISOLATED | 🔴 Legacy — no longer used. All downloads use `fetch()` directly. |
 | `BILI_TRIGGER_FFMPEG` | MAIN→ISOLATED | Request FFmpeg files from service worker |
 | `BILI_FFMPEG_RESPONSE` | ISOLATED→MAIN | Return FFmpeg file paths + extension ID |
 | `BILI_DOWN_STATUS` / `BILI_BRIDGE_STATUS_UPDATE` | MAIN→ISOLATED | Status updates |
@@ -57,7 +57,7 @@ FFmpeg.wasm requires SharedArrayBuffer, which needs cross-origin isolation heade
 3. Picks best video track (SDR preferred, HDR if requested) and audio track from DASH manifest
 4. Calls `showSaveFilePicker` IMMEDIATELY (user gesture required, must not be deferred)
 5. **If file < threshold**: downloads video + audio into memory, merges via FFmpeg.wasm, writes merged MP4 to file handle
-6. **If file > threshold**: streams video directly to file handle via `fetch().body.pipeTo(writable)` (no OOM), audio via blob URL download
+6. **If file > threshold**: streams video directly to file handle (no OOM), audio via blob URL download
 7. Falls back to blob URL download for both tracks if file handle unavailable
 
 ### Dynamic Merge Threshold
@@ -73,16 +73,17 @@ Formula: `navigator.deviceMemory` based, with conservative clamping.
 
 ### Three-Layer Size Protection
 
-1. **HEAD probe**: Quick `Content-Length` request BEFORE download starts. If size > threshold, offers split immediately — no wasted download.
-2. **Early abort**: When downloading response body, reads `Content-Length` header at stream start. Single track already > threshold → aborts.
-3. **Post-download safety net**: Always checks actual downloaded size against threshold.
+1. **HEAD probe**: Quick `Content-Length` / `Content-Range` request BEFORE download starts. If size > threshold, offers split immediately — no wasted download time. CDN may not support HEAD → returns 0, falls through to post-download check.
+2. **Early abort in fetchBin**: When downloading response body, reads `Content-Length` header at stream start. Single track already > threshold → throws `FILE_TOO_LARGE` → split dialog.
+3. **Post-download safety net**: Always checks actual downloaded size against threshold. Catches cases where HEAD probe failed or returned inaccurate values.
 
 ### Split Download Streaming
 
-Large files (>threshold) stream video directly to disk, no memory OOM:
+Large files (>threshold) are split into separate video/audio downloads instead of merging in memory:
 
-- **Video**: Streamed via `fetch()` → `res.body.pipeTo(writable)` — no ArrayBuffer
-- **Audio**: Downloaded via `fetch()` and saved as blob URL (small, <300MB)
+- **Video**: Downloaded via `fetch()` with `credentials: 'include'` → on 403 falls back to `credentials: 'omit'`. Streamed to file handle in chunks (no `arrayBuffer()`, no OOM). Progress shown in overlay every 200ms via shared `_prog` state.
+- **Audio**: Downloaded via `fetch()` and saved as blob URL (small, <300MB).
+- **No longer uses `chrome.downloads.download` or `service_worker.js` for downloads** — all download requests go through `fetch()` which respects DNR rules for proper Referer/Origin headers.
 - Combined progress in overlay: `"视频: 1.2GB/8.4GB 15% | 音频: ✓"`
 
 ### URL Pattern Support
@@ -106,12 +107,24 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 - content_merge.js: inline `T` object (same pattern)
 - `_locales/`: Chrome's `chrome.i18n` messages (manifest.json `__MSG_*__` only)
 
+### DNR Rules (`rules.json`)
+
+| # | Action | Resource Types | Purpose |
+|---|--------|---------------|---------|
+| 1001 | Set `Referer` + remove `Origin` | `xmlhttprequest`, `other` | Ensures CDN requests have proper Referer. CRITICAL for downloads. |
+| 1003 | Remove `Content-Security-Policy` | `main_frame`, `sub_frame` | Enables FFmpeg.wasm without CSP restrictions |
+| 1004 | Set `Cross-Origin-Opener-Policy` + `Cross-Origin-Embedder-Policy` | `main_frame` | Enables `SharedArrayBuffer` for FFmpeg MT mode |
+
+**Removed**: Rule 1002 (CORS header override) was removed in v1.2.11 — CDN already returns correct `Access-Control-Allow-Origin: *`. The override caused CORS origin mismatch errors.
+
+**Note**: Dynamic DNR rule (ID 20001, service worker) is deprecated. All downloads now use `fetch()` which respects static rules.
+
 ## Important Files
 
-- `rules.json` — `declarativeNetRequest` rules: CORS bypass for CDN domains, CSP removal, COOP/COEP injection for SharedArrayBuffer
+- `rules.json` — DNR rules: Referer injection, CSP removal, COOP/COEP for SharedArrayBuffer. Only 3 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds). If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`
-- `content_merge.js` — Largest file (~1100 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing
-- `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access
-- `service_worker.js` — Background service worker: DNR dynamic rules, download management
-- `afdian-worker/` — Activation code verification Worker (Cloudflare + Vercel proxy), separate v1.3.0 branch
-- `vercel-api/` — Vercel API proxy for China-stable activation endpoint
+- `content_merge.js` — Largest file (~1100 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display
+- `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
+- `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version.
+- `afdian-worker/` — Activation code verification Worker (Cloudflare + Vercel proxy), separate branch (inactive)
+- `vercel-api/` — Vercel API proxy (inactive)
