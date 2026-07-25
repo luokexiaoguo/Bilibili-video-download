@@ -91,6 +91,10 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.12 (2026-07-25)
+- **Fix**: Restored CORS response header rule (1002) — fixes download failures on CDN nodes missing CORS headers.
+- **Optimization**: Added initiatorDomains to DNR rules (1001/1002) to prevent interference with live streaming.
+
 ### v1.2.11 (2026-07-25)
 - **Fix**: Fixed CORS header override causing CDN request rejections for some videos.
 - **Optimization**: Simplified DNR rules to only keep essential header modifications.
