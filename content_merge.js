@@ -878,9 +878,20 @@
 
         // Save via File System Access API (handle obtained early)
         overlay.setStep(T.saveFile);
-        const w = await fileHandle.createWritable();
-        await w.write(out);
-        await w.close();
+        try {
+          const w = await fileHandle.createWritable();
+          await w.write(out);
+          await w.close();
+        } catch (e) {
+          console.warn("[FFmpeg] File handle write failed, falling back to blob:", e);
+          const mergedBin = out; out = null;
+          overlay.setStep(T.browserDl); overlay.setProgress(90);
+          overlay.setDetail("文件保存失败，尝试浏览器下载...");
+          saveBlob(mergedBin, `${T.video}-${filename}.mp4`);
+          overlay.setStep(T.dlDone); overlay.setProgress(100); overlay.done();
+          setTimeout(() => overlay.remove(), 5000);
+          return;
+        }
 
         overlay.setStep(T.dlDone);
         overlay.setProgress(100);
