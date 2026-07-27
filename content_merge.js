@@ -716,29 +716,12 @@
         console.log("[FFmpeg] Core JS URL:", coreJsUrl);
         console.log("[FFmpeg] WASM URL:", wasmUrl);
 
-        // Set up Module.locateFile BEFORE loading core JS, so it intercepts WASM loading
-        window.Module = window.Module || {};
-        window.Module.locateFile = (p) => {
-          if (p && p.endsWith('.wasm')) return wasmUrl;
-          return p;
-        };
-
-        // Load core JS from extension URL directly
-        await Promise.race([
-          new Promise((res, rej) => {
-            const s = document.createElement("script");
-            s.src = coreJsUrl;
-            s.onload = () => { console.log("[FFmpeg] Core JS loaded OK"); res(); };
-            s.onerror = (e) => { console.error("[FFmpeg] Core JS load error:", e); rej(new Error("Core JS script failed")); };
-            (document.head || document.documentElement).appendChild(s);
-          }),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("Core JS load timeout")), 15000))
-        ]);
-
+        // Let ffmpeg.wasm handle loading — it will fetch core JS + WASM from our URLs
+        // Do NOT pre-load ffmpeg-core.js as a script tag (was causing WASM to load from unpkg default)
         const createFFmpeg = window.FFmpeg.createFFmpeg;
 
-        // Create FFmpeg with WASM path pointing to extension URL
-        const ffmpeg = createFFmpeg({ wasmPath: wasmUrl, log: true });
+        // Create FFmpeg with both corePath and wasmPath pointing to extension URLs
+        const ffmpeg = createFFmpeg({ corePath: coreJsUrl, wasmPath: wasmUrl, log: true });
         console.log("[FFmpeg] Calling ffmpeg.load()...");
         try {
           await Promise.race([
