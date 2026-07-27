@@ -96,7 +96,9 @@ The extension supports three URL patterns on bilibili.com:
 
 ### Multi-Part Video Fix
 
-When user selects a specific part from the multi-part selector, `resolveBilibili(specificCid)` skips `getCurrentVideoCid()` and `__playinfo__` fallback (which return the initial page load's data), going directly to the API with the correct cid.
+When user selects a specific part from the multi-part selector, `resolveBilibili(specificCid, specificEpId)` skips `getCurrentVideoCid()` and `__playinfo__` fallback (which return the initial page load's data), going directly to the API with the correct cid/epId.
+
+Supports: regular multi-part videos (`videoData.pages`), bangumi/anime (`epList`/`mediaInfo.episodes`), UGC合集 (`videoData.ugc_season.episodes`), and series (`videoData.series.list`).
 
 ### HDR/SDR Track Selection
 
