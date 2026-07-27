@@ -721,8 +721,7 @@
         const createFFmpeg = window.FFmpeg.createFFmpeg;
 
         // Create FFmpeg with corePath/wasmPath pointing to extension URLs
-        // workerPath must be set to avoid fetching ffmpeg-core.worker.js (not included in extension)
-        const ffmpeg = createFFmpeg({ corePath: coreJsUrl, wasmPath: wasmUrl, workerPath: coreJsUrl, log: true });
+        const ffmpeg = createFFmpeg({ corePath: coreJsUrl, wasmPath: wasmUrl, log: true });
         console.log("[FFmpeg] Calling ffmpeg.load()...");
         try {
           await Promise.race([
