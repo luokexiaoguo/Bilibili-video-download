@@ -720,8 +720,9 @@
         // Do NOT pre-load ffmpeg-core.js as a script tag (was causing WASM to load from unpkg default)
         const createFFmpeg = window.FFmpeg.createFFmpeg;
 
-        // Create FFmpeg with both corePath and wasmPath pointing to extension URLs
-        const ffmpeg = createFFmpeg({ corePath: coreJsUrl, wasmPath: wasmUrl, log: true });
+        // Create FFmpeg with corePath/wasmPath pointing to extension URLs
+        // workerPath must be set to avoid fetching ffmpeg-core.worker.js (not included in extension)
+        const ffmpeg = createFFmpeg({ corePath: coreJsUrl, wasmPath: wasmUrl, workerPath: coreJsUrl, log: true });
         console.log("[FFmpeg] Calling ffmpeg.load()...");
         try {
           await Promise.race([
