@@ -195,14 +195,22 @@
     const getMultiPartInfo = () => {
       try {
         const st = window.__INITIAL_STATE__ || {};
-        // 普通视频：多P
+        // 普通视频多P：videoData.pages
         let pages = (st.videoData || {}).pages || [];
-        // 番剧/电影：epList 或 mediaInfo.episodes
+        // 番剧/电影/电视剧：epList 或 mediaInfo.episodes
         if (!pages.length && st.epList?.length) {
-          pages = st.epList.map((ep, i) => ({ part: ep.title || `第${i+1}集`, cid: ep.cid, epId: ep.id }));
+          pages = st.epList.map((ep) => ({ part: ep.title || ep.long_title || '', cid: ep.cid, epId: ep.id }));
         }
         if (!pages.length && st.mediaInfo?.episodes?.length) {
-          pages = st.mediaInfo.episodes.map((ep, i) => ({ part: ep.title || `第${i+1}集`, cid: ep.cid, epId: ep.id }));
+          pages = st.mediaInfo.episodes.map((ep) => ({ part: ep.title || ep.long_title || '', cid: ep.cid, epId: ep.id }));
+        }
+        // UGC合集（用户创建的合集/系列）：videoData.ugc_season.episodes
+        if (!pages.length && st.videoData?.ugc_season?.episodes?.length) {
+          pages = st.videoData.ugc_season.episodes.map((ep) => ({ part: ep.title || '', cid: ep.cid }));
+        }
+        // 系列视频：videoData.series.list
+        if (!pages.length && st.videoData?.series?.list?.length) {
+          pages = st.videoData.series.list.map((ep) => ({ part: ep.title || '', cid: ep.cid }));
         }
         if (pages.length > 1) {
           const p = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
