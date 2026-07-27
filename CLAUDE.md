@@ -43,8 +43,9 @@ popup.html/popup.js  →  content_bridge.js (ISOLATED world)  ↔  service_worke
 FFmpeg files cannot be loaded via data URLs (24MB WASM = 32MB base64, too large). Instead:
 1. Bridge verifies files exist via service worker (HEAD requests)
 2. Bridge returns extension ID to MAIN world
-3. content_merge.js loads files directly from `chrome-extension://<id>/ffmpeg/...` URLs (declared as `web_accessible_resources`)
-4. `Module.locateFile` override points WASM loading to the extension URL
+3. content_merge.js loads `ffmpeg.min.js` from `chrome-extension://<id>/ffmpeg/...` (declared as `web_accessible_resources`)
+4. `ffmpeg.load()` is called with `corePath` and `wasmPath` pointing to extension URLs — ffmpeg.wasm handles fetching core JS + WASM from the extension directly
+5. **Do NOT pre-load ffmpeg-core.js as a script tag** — was causing WASM to load from unpkg.com default path instead of extension URL
 
 ### SharedArrayBuffer Requirement
 
