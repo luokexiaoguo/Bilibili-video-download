@@ -195,7 +195,15 @@
     const getMultiPartInfo = () => {
       try {
         const st = window.__INITIAL_STATE__ || {};
-        const pages = (st.videoData || {}).pages || (st.metadata || {}).list || [];
+        // 普通视频：多P
+        let pages = (st.videoData || {}).pages || [];
+        // 番剧/电影：epList 或 mediaInfo.episodes
+        if (!pages.length && st.epList?.length) {
+          pages = st.epList.map((ep, i) => ({ part: ep.title || `第${i+1}集`, cid: ep.cid, epId: ep.id }));
+        }
+        if (!pages.length && st.mediaInfo?.episodes?.length) {
+          pages = st.mediaInfo.episodes.map((ep, i) => ({ part: ep.title || `第${i+1}集`, cid: ep.cid, epId: ep.id }));
+        }
         if (pages.length > 1) {
           const p = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
           return { pages, currentIndex: Math.min(p, pages.length - 1) };
@@ -353,7 +361,7 @@
       return null;
     };
 
-    async function resolveBilibili(specificCid) {
+    async function resolveBilibili(specificCid, specificEpId) {
       // 如果用户明确指定了 cid（分P选择器），优先使用，跳过自动检测
       const currentCid = specificCid ? null : getCurrentVideoCid();
       if (currentCid) {
@@ -372,15 +380,16 @@
           } catch (_) {}
         }
         
-        // 番剧使用 ep_id 方式
+        // 番剧使用 ep_id 方式（优先使用选择器指定的 epId，否则用当前 URL 的）
         const ep = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
-        if (ep) {
+        const epId = specificEpId || (ep ? ep[1] : null);
+        if (currentCid && epId) {
           try {
-            const u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1&cid=${currentCid.cid}&ep_id=${ep[1]}`;
+            const u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1&cid=${currentCid.cid}&ep_id=${epId}`;
             const pr = await fetchWithTimeout(u, { credentials: "include" });
             const pj = await pr.json();
             if (pj?.result?.dash || pj?.data?.dash) {
-              console.log('[BiliDown] Using real-time cid for bangumi:', currentCid.cid);
+              console.log('[BiliDown] Using real-time cid for bangumi:', currentCid.cid, 'epId:', epId);
               return pj.result.dash || pj.data.dash;
             }
           } catch (_) {}
@@ -402,7 +411,9 @@
       // 最后回退：使用 getBvid 获取 bvid/cid 然后请求 API
       const info = await getBvid();
       if (!info) return null;
-      const { bvid, epId } = info;
+      const bvid = info.bvid;
+      // 选择器指定的 epId 优先级高于页面初始数据
+      const epId = specificEpId || info.epId;
       let cid = specificCid || info.cid;
 
       if (!cid && bvid) {
@@ -1087,7 +1098,7 @@
 
     let dash;
     try {
-      dash = await Promise.race([resolveBilibili(selPage?.cid), new Promise((_, r) => setTimeout(() => r(new Error("超时")), 10000))]);
+      dash = await Promise.race([resolveBilibili(selPage?.cid, selPage?.epId), new Promise((_, r) => setTimeout(() => r(new Error("超时")), 10000))]);
     } catch(e) {
       overlay.setStep(T.parseErr); overlay.setDetail(e.message); overlay.done(); return;
     }
