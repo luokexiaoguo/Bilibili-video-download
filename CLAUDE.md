@@ -10,9 +10,13 @@ Bilibili Video Downloader (BiliDown) — a Chrome/Edge browser extension (Manife
 
 This is an **unpacked extension** — no build step needed. Load the root directory (containing `manifest.json`) via `chrome://extensions/` → "Load unpacked" with Developer Mode enabled. Reload the extension after changes.
 
-**Critical**: Do NOT have directories starting with `_` in the project root (except `_locales`). Chrome rejects extensions with such directories (`__pycache__` etc).
+**Critical**: Do NOT create directories starting with `_` in the project root (except `_locales`). Chrome rejects extensions with such directories (`__pycache__` etc). Note: `_metadata/` appears at root after loading — that's Chrome's own generated file, gitignored, leave it alone.
 
 There is no linter, formatter, or test suite configured.
+
+## Release / Versioning
+
+Version lives in `manifest.json` (`version`). Each release bumps it and adds a changelog entry to the top of the "更新日志" sections in **both** `README.md` and `README_EN.md` (keep them in sync). The release zip is built into `dist/` (gitignored) — no script automates this.
 
 ## Architecture
 
@@ -46,6 +50,8 @@ FFmpeg files cannot be loaded via data URLs (24MB WASM = 32MB base64, too large)
 3. content_merge.js loads `ffmpeg.min.js` from `chrome-extension://<id>/ffmpeg/...` (declared as `web_accessible_resources`)
 4. `ffmpeg.load()` is called with `corePath` and `wasmPath` pointing to extension URLs — ffmpeg.wasm handles fetching core JS + WASM from the extension directly
 5. **Do NOT pre-load ffmpeg-core.js as a script tag** — was causing WASM to load from unpkg.com default path instead of extension URL
+
+`useMT = !!window.SharedArrayBuffer` (content_merge.js) selects the MT core (`ffmpeg-core.js`) when cross-origin isolation is present, else the ST core (`ffmpeg-core-st.js`). The ST build must be a genuine single-threaded build — a byte-identical "fake ST" (same as MT) still imports SharedArrayBuffer and breaks on pages lacking COOP/COEP. Symptom: first download's merge fails; after browser restart, downloads fail entirely. Verify with `grep -c SharedArrayBuffer ffmpeg/ffmpeg-core-st.js` (expect 0).
 
 ### SharedArrayBuffer Requirement
 
@@ -124,9 +130,10 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 ## Important Files
 
 - `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. 4 active rules.
-- `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds). If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`
+- `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds); `useMT` picks between them. If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`. The ST core must be a real ST build — a fake ST (byte-identical to MT) silently breaks first-merge / post-restart downloads.
 - `content_merge.js` — Largest file (~1100 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
 - `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version.
-- `afdian-worker/` — Activation code verification Worker (Cloudflare + Vercel proxy), separate branch (inactive)
-- `vercel-api/` — Vercel API proxy (inactive)
+- `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`.
+- `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); source lives on a separate branch.
+- Root `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md` — unrelated poster-generation tooling, not part of the extension; ignore.

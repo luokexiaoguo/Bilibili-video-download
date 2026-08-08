@@ -91,6 +91,11 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.14 (2026-08-09)
+- **Fix**: Fixed a TDZ error (`fileHandle` referenced before declaration) when starting split download on browsers without the File System Access API (Firefox / older Chrome).
+- **Fix**: Fixed the no-file-handle blob fallback saving a 0-byte empty file without actually downloading the tracks — now downloads from the real stream URLs.
+- **Fix**: Fixed the blob-save fallback after a file-handle write failure throwing "Assignment to constant variable" and wrongly offering split download.
+
 ### v1.2.13 (2026-07-27)
 - **Fix**: Fixed InvalidStateError on file handle write after successful merge.
 - **Fix**: Fixed bangumi multi-episode selector always downloading episode 1.

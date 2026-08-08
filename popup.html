@@ -18,9 +18,12 @@ button:active{transform:scale(0.98)}
 .tips ul{margin:0;padding-left:16px}
 .tips li{margin-bottom:4px}
 .tips li:last-child{margin-bottom:0}
-.footer{margin-top:15px;font-size:12px;color:#666;text-align:center;border-top:1px solid #333;padding-top:15px}
+.footer{margin-top:15px;font-size:12px;color:#888;text-align:center;border-top:1px solid #333;padding-top:15px}
 .footer a{color:#FB7299;text-decoration:none}
 .footer a:hover{text-decoration:underline}
+.foot-tip{margin-bottom:10px;font-size:11px;color:#888;line-height:1.7}
+.foot-btn{display:inline-block;padding:5px 20px;border:1px solid rgba(251,114,153,0.6);border-radius:20px;color:#FB7299;font-size:12px;margin-bottom:10px}
+.foot-btn:hover{background:rgba(251,114,153,0.12);text-decoration:none;color:#FB7299}
 .quality-group{display:flex;gap:8px;margin-bottom:15px}
 .quality-opt{flex:1;position:relative;cursor:pointer}
 .quality-opt input{position:absolute;opacity:0;width:0;height:0}
@@ -62,9 +65,9 @@ button:active{transform:scale(0.98)}
 <button id="send" data-i18n="btnDownload">一键下载（最高支持8K）</button>
 <div id="msg"></div>
 <div class="footer">
-  <div style="margin-bottom:4px"><span data-i18n="footerEmail">反馈邮箱：</span><a href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a></div>
-  <div style="margin-bottom:4px;font-size:11px;color:#888" data-i18n="footerFeedback">💬 遇到问题先反馈，我们为您解决 🙏</div>
-	  <div><span data-i18n="footerSupport">感觉不错可以支持个鸡腿：</span><a href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer" data-i18n="linkSupport">支持</a></div>
+  <div class="foot-tip" data-i18n="footerFeedback">插件制作不易，如果它确实帮到了你，希望能支持一下，让我有动力持续更新！</div>
+  <div><a class="foot-btn" href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer" data-i18n="linkSupport">支持</a></div>
+  <div style="margin-top:2px"><span data-i18n="footerEmail">反馈邮箱：</span><a href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a></div>
 </div>
 <script src="popup.js"></script>
 </body>

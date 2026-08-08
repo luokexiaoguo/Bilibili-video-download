@@ -581,9 +581,9 @@
     // ============================================================
     const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
       if (!window.showSaveFilePicker) {
-        // Fallback: blob URL download for both (no file handle)
+        // Fallback: blob URL download for both (no file handle available)
         overlay.setStep(T.browserDl); overlay.setProgress(90);
-        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
+        doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, null);
         return;
       }
 
@@ -884,7 +884,7 @@
           await w.close();
         } catch (e) {
           console.warn("[FFmpeg] File handle write failed, falling back to blob:", e);
-          const mergedBin = out; out = null;
+          const mergedBin = out;
           overlay.setStep(T.browserDl); overlay.setProgress(90);
           overlay.setDetail("文件保存失败，尝试浏览器下载...");
           saveBlob(mergedBin, `${T.video}-${filename}.mp4`);
@@ -1011,7 +1011,15 @@
       _prog.v = ''; _prog.a = '';
       let _done = 0;
       const _checkDone = () => { _done++; if (_done >= 2) { overlay.setProgress(100); overlay.done(); } };
-      if (!fh) { console.warn('[Split] No fileHandle, using blob fallback'); saveBlob(vData || new Uint8Array(0), vName || 'fallback.mp4'); _checkDone(); return; }
+      if (!fh) {
+        console.warn('[Split] No fileHandle, using blob fallback');
+        // Download video and audio via blob URLs (no file handle available)
+        if (vData) { saveBlob(vData, vName || 'fallback.mp4'); _checkDone(); }
+        else if (vUrls) fetchToBlob(vUrls, vName || 'fallback.mp4').then(_checkDone);
+        if (aData) { saveBlob(aData, aName || 'fallback.m4a'); _checkDone(); }
+        else if (aUrls) setTimeout(() => fetchToBlob(aUrls, aName || 'fallback.m4a').then(_checkDone), 500);
+        return;
+      }
       // Video — prefer fileHandle, stream to disk
       if (vData) {
         (async () => {
