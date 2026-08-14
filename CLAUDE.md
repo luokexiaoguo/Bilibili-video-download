@@ -18,6 +18,8 @@ There is no linter, formatter, or test suite configured.
 
 Version lives in `manifest.json` (`version`). Each release bumps it and adds a changelog entry to the top of the "更新日志" sections in **both** `README.md` and `README_EN.md` (keep them in sync). The release zip is built into `dist/` (gitignored) — no script automates this.
 
+**Release pushes go ONLY to `main` (GitHub + Gitee), never `master`** — despite active development happening on `master`, release commits/tags are pushed to `main`. Keep `dist/` containing only the newest version's zip when packaging.
+
 ## Architecture
 
 Three-layer script architecture with Chrome's ISOLATED/MAIN world separation:
@@ -131,9 +133,9 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 
 - `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. 4 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds); `useMT` picks between them. If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`. The ST core must be a real ST build — a fake ST (byte-identical to MT) silently breaks first-merge / post-restart downloads.
-- `content_merge.js` — Largest file (~1100 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display
+- `content_merge.js` — Largest file (~1200 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
 - `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version.
 - `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`.
-- `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); source lives on a separate branch.
+- `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); the actual source (`worker.js`, `wrangler.toml`, `api/activate.js`, `api/claim-api.js`, `api/status.js`, `vercel.json`) lives on the `activation-system` branch.
 - Root `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md` — unrelated poster-generation tooling, not part of the extension; ignore.
