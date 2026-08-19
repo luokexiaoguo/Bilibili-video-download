@@ -1,4 +1,8 @@
 (async () => {
+  // 防重复注入:同一页面每次点击"下载"都会重新注入本脚本。
+  // 没有守卫的话,反复下载会叠加多个 overlay 和 window 监听器(内存泄漏)。
+  if (window.__BILI_DRIVER_ACTIVE__) return;
+  window.__BILI_DRIVER_ACTIVE__ = true;
   try {
     console.log("[BilibiliDownloader] Script started");
 
@@ -663,7 +667,10 @@
         overlay.setStep(T.bigFile);
         overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
+          (async () => {
+            const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
+            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
+          })();
         } else {
           overlay.remove();
         }
@@ -792,15 +799,19 @@
             }
             const reader = res.body.getReader();
             const chunks = []; let loaded = 0;
-            const start = performance.now();
+            const start = performance.now(); let lastUpd = 0;
             while (true) {
               if (signal.aborted) throw new Error("Aborted");
               const { done, value } = await reader.read();
               if (done) break;
               chunks.push(value); loaded += value.length;
-              const elapsed = (performance.now() - start) / 1000;
-              const pct = total ? (loaded / total) * 100 : 0;
-              overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(loaded/Math.max(0.1,elapsed))}/s) ${pct.toFixed(0)}%`);
+              const now = performance.now();
+              if (now - lastUpd > 200) {
+                lastUpd = now;
+                const elapsed = (now - start) / 1000;
+                const pct = total ? (loaded / total) * 100 : 0;
+                overlay.setDetail(`${label}: ${fmtBytes(loaded)} / ${fmtBytes(total)} (${fmtBytes(loaded/Math.max(0.1,elapsed))}/s) ${pct.toFixed(0)}%`);
+              }
             }
             const buf = new Uint8Array(loaded);
             let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
@@ -833,7 +844,10 @@
           console.warn("[SizeCheck] fetchBin aborted early:", e.message);
           overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
           if (confirm(T.bigFileConfirm)) {
-            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
+            (async () => {
+              const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
+              doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
+            })();
           } else {
             overlay.remove();
           }
@@ -843,7 +857,10 @@
         overlay.setStep(T.errTitle);
         overlay.setDetail("下载失败，是否尝试分别下载？");
         if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || "下载失败"))) {
-          doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
+          (async () => {
+            const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
+            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
+          })();
         } else {
           overlay.remove();
         }
@@ -857,7 +874,10 @@
         console.log("[SizeCheck] Actual size", Math.round(actualTotalSize/1024/1024), "MB exceeds threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB → split");
         overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
         if (confirm(T.bigFileConfirm)) {
-          doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
+          (async () => {
+            const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
+            doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
+          })();
         } else {
           overlay.remove();
         }
@@ -911,7 +931,10 @@
       const isOOM = /Array buffer allocation|out of memory|Cannot allocate/i.test(String(ffmpegError?.message || ''));
       overlay.setDetail(isOOM ? "内存不足，无法合并。请分别下载视频和音频。" : "合并失败，是否分别下载视频和音频？");
       if (confirm(T.mergeFailConfirm.replace("{msg}", isOOM ? "内存不足" : "合并过程出错"))) {
-        doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle);
+        (async () => {
+          const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
+          doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
+        })();
       } else {
         overlay.remove();
       }
@@ -1005,8 +1028,26 @@
       _updateDetail();
     };
 
+    // Acquire an audio save handle in the same user gesture as the split confirm,
+    // so audio lands beside the video (user-chosen folder) instead of the default dir.
+    // Returns null if unsupported / user cancels — caller falls back to blob.
+    const acquireAudioHandle = async (aName) => {
+      if (!window.showSaveFilePicker) return null;
+      try {
+        return await window.showSaveFilePicker({
+          suggestedName: aName,
+          types: [{ description: 'M4A', accept: {'audio/mp4': ['.m4a', '.m4s']} }]
+        });
+      } catch (e) {
+        if (e?.name === 'AbortError') return null; // user cancelled audio dialog
+        throw e;
+      }
+    };
+
     // Unified split download — handles all scenarios
-    const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName, fh) => {
+    // afh = optional audio file handle; when provided, audio is written there
+    // (follows the video's chosen location) instead of the browser default dir.
+    const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName, fh, afh = null) => {
       overlay.setStep(T.browserDl); overlay.setProgress(90);
       _prog.v = ''; _prog.a = '';
       let _done = 0;
@@ -1031,21 +1072,22 @@
             await w.close();
             _prog.v = `${T.video}: ✓`;
             _updateDetail(); _checkDone();
-          } catch (e) { console.error('[Split] Video handle write FAILED:', e); saveBlob(vData, vName); }
+          } catch (e) { console.error('[Split] Video handle write FAILED:', e); saveBlob(vData, vName); _checkDone(); }
         })();
       } else {
         (async () => {
           const urls = Array.isArray(vUrls) ? vUrls : [vUrls];
           for (const url of urls) {
             try {
+              if (signal.aborted) throw new Error("Aborted");
               let res;
               try {
-                res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
+                res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
                 if (res?.status === 403 || !res?.ok) {
-                  res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin' });
+                  res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin', signal });
                 }
               } catch (e) {
-                res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin' });
+                res = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin', signal });
               }
               const total = Number(res.headers.get('content-length')) || 0;
               if (!res.ok || !res.body) continue;
@@ -1055,51 +1097,107 @@
               await streamWithProgress(res, w, T.video, total);
               _checkDone();
               return;
-            } catch (e) { console.error('[Split] Video URL FAILED:', e.message || e); }
+            } catch (e) {
+              if (e?.message === 'Aborted' || signal.aborted) { overlay.remove(); return; }
+              console.error('[Split] Video URL FAILED:', e.message || e);
+            }
           }
           _prog.v = `${T.video}: 所有 URL 失败`;
           _updateDetail(); _checkDone();
         })();
       }
-      // Audio — progress shown in shared display alongside video
+      // Audio — written to afh (chosen folder) when available, else blob default dir
       setTimeout(() => {
         const audioDone = () => { _prog.a = `${T.audio}: ✓`; _updateDetail(); _checkDone(); };
-        if (aData) {
-          _prog.a = `${T.audio}: 保存中...`;
-          _updateDetail();
-          saveBlob(aData, aName, audioDone);
-        } else {
-          if (!Array.isArray(aUrls)) aUrls = [aUrls];
-          _prog.a = `${T.audio}: 下载中...`;
-          _updateDetail();
-          // fetchToBlob with progress writing to _prog.a
-          (async () => {
-            for (const url of aUrls) {
-              try {
-                const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin' });
-                if (!res.ok) continue;
-                const total = Number(res.headers.get('content-length')) || 0;
-                const reader = res.body.getReader();
-                const chunks = []; let loaded = 0; const start = performance.now();
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  chunks.push(value); loaded += value.length;
-                  const elapsed = (performance.now() - start) / 1000;
-                  const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
-                  _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
+        const audioBlobFallback = () => {
+          if (aData) { _prog.a = `${T.audio}: 保存中...`; _updateDetail(); saveBlob(aData, aName, audioDone); }
+          else {
+            if (!Array.isArray(aUrls)) aUrls = [aUrls];
+            _prog.a = `${T.audio}: 下载中...`;
+            _updateDetail();
+            (async () => {
+              for (const url of aUrls) {
+                try {
+                  const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+                  if (!res.ok) continue;
+                  const total = Number(res.headers.get('content-length')) || 0;
+                  const reader = res.body.getReader();
+                  const chunks = []; let loaded = 0; const start = performance.now();
+                  while (true) {
+                    if (signal.aborted) throw new Error("Aborted");
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value); loaded += value.length;
+                    const elapsed = (performance.now() - start) / 1000;
+                    const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
+                    _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
+                    _updateDetail();
+                  }
+                  const buf = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
+                  let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+                  _prog.a = `${T.audio}: 触发下载...`;
                   _updateDetail();
+                  saveBlob(buf, aName, audioDone);
+                  return;
+                } catch (e) {
+                  if (e?.message === 'Aborted' || signal.aborted) { overlay.remove(); return; }
+                  console.warn('[Audio] URL failed:', e);
                 }
-                const buf = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
-                let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
-                _prog.a = `${T.audio}: 触发下载...`;
-                _updateDetail();
-                saveBlob(buf, aName, audioDone);
-                return;
-              } catch (e) { console.warn('[Audio] URL failed:', e); }
-            }
-            audioDone();
-          })();
+              }
+              audioDone();
+            })();
+          }
+        };
+        // If we have an audio handle, write to it; else fall back to blob.
+        if (afh) {
+          if (aData) {
+            _prog.a = `${T.audio}: 写入中... ${fmtBytes(aData.byteLength)}`; _updateDetail();
+            (async () => {
+              try {
+                const w = await afh.createWritable();
+                await w.write(aData);
+                await w.close();
+                audioDone();
+              } catch (e) { console.error('[Split] Audio handle write FAILED:', e); audioBlobFallback(); }
+            })();
+          } else {
+            if (!Array.isArray(aUrls)) aUrls = [aUrls];
+            _prog.a = `${T.audio}: 下载中...`; _updateDetail();
+            (async () => {
+              for (const url of aUrls) {
+                try {
+                  if (signal.aborted) throw new Error("Aborted");
+                  const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+                  if (!res.ok) continue;
+                  const total = Number(res.headers.get('content-length')) || 0;
+                  const w = await afh.createWritable();
+                  const reader = res.body.getReader();
+                  let loaded = 0; const start = performance.now();
+                  while (true) {
+                    if (signal.aborted) { try { await w.abort(); } catch (_) {} throw new Error("Aborted"); }
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    await w.write(value); loaded += value.length;
+                    const elapsed = (performance.now() - start) / 1000;
+                    const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
+                    _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
+                    _updateDetail();
+                  }
+                  await w.close();
+                  audioDone();
+                  return;
+                } catch (e) {
+                  if (e?.message === 'Aborted' || signal.aborted) { overlay.remove(); return; }
+                  console.warn('[Audio] URL failed:', e);
+                  audioBlobFallback();
+                  return;
+                }
+              }
+              audioDone();
+            })();
+          }
+        } else {
+          audioBlobFallback();
         }
       }, 500);
     };

@@ -91,6 +91,12 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.15 (2026-08-19)
+- **Fix**: Split downloads now save audio to the same folder as the video (two save dialogs, matching the tips) instead of the browser's default download folder.
+- **Fix**: Cancelling a split download no longer hangs the overlay.
+- **Optimize**: Added a re-injection guard to prevent overlay/listener accumulation (memory leak) on repeated downloads.
+- **Optimize**: Throttled download progress updates to reduce jank on low-end devices.
+
 ### v1.2.14 (2026-08-09)
 - **Fix**: Fixed a TDZ error (`fileHandle` referenced before declaration) when starting split download on browsers without the File System Access API (Firefox / older Chrome).
 - **Fix**: Fixed the no-file-handle blob fallback saving a 0-byte empty file without actually downloading the tracks — now downloads from the real stream URLs.

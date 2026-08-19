@@ -66,7 +66,7 @@ FFmpeg.wasm requires SharedArrayBuffer, which needs cross-origin isolation heade
 3. Picks best video track (SDR preferred, HDR if requested) and audio track from DASH manifest
 4. Calls `showSaveFilePicker` IMMEDIATELY (user gesture required, must not be deferred)
 5. **If file < threshold**: downloads video + audio into memory, merges via FFmpeg.wasm, writes merged MP4 to file handle
-6. **If file > threshold**: streams video directly to file handle (no OOM), audio via blob URL download
+6. **If file > threshold**: split confirm → `acquireAudioHandle()` gets a second file handle in the same gesture → video streams to its handle, audio to the other (same folder)
 7. Falls back to blob URL download for both tracks if file handle unavailable
 
 ### Dynamic Merge Threshold
@@ -91,9 +91,16 @@ Formula: `navigator.deviceMemory` based, with conservative clamping.
 Large files (>threshold) are split into separate video/audio downloads instead of merging in memory:
 
 - **Video**: Downloaded via `fetch()` with `credentials: 'include'` → on 403 falls back to `credentials: 'omit'`. Streamed to file handle in chunks (no `arrayBuffer()`, no OOM). Progress shown in overlay every 200ms via shared `_prog` state.
-- **Audio**: Downloaded via `fetch()` and saved as blob URL (small, <300MB).
+- **Audio**: On split confirm, `acquireAudioHandle()` requests a second `showSaveFilePicker` inside the same user gesture → audio is written to the user-chosen file handle, **same folder as the video**. Falls back to blob URL only if the audio picker is cancelled / unsupported.
 - **No longer uses `chrome.downloads.download` or `service_worker.js` for downloads** — all download requests go through `fetch()` which respects DNR rules for proper Referer/Origin headers.
 - Combined progress in overlay: `"视频: 1.2GB/8.4GB 15% | 音频: ✓"`
+- All split fetches pass `signal`; on abort the overlay is removed (no stuck download).
+
+### Memory-Safety & Cleanup
+
+- **Injection guard**: `content_merge.js` re-injects on every click of the download button. A `window.__BILI_DRIVER_ACTIVE__` flag at the top prevents stacking duplicate overlays / window listeners on repeated downloads.
+- **Progress throttling**: `fetchBin` updates `overlay.setDetail` at most every 200ms (matching `streamWithProgress`) to avoid high-frequency DOM writes on small chunks.
+- `saveBlob` revokes its object URL after 120s; FFmpeg FS files are `unlink`ed after merge.
 
 ### URL Pattern Support
 
@@ -133,7 +140,7 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 
 - `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. 4 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds); `useMT` picks between them. If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`. The ST core must be a real ST build — a fake ST (byte-identical to MT) silently breaks first-merge / post-restart downloads.
-- `content_merge.js` — Largest file (~1200 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display
+- `content_merge.js` — Largest file (~1300 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display. Starts with a `__BILI_DRIVER_ACTIVE__` re-injection guard.
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
 - `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version.
 - `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`.
