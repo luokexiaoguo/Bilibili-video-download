@@ -2,6 +2,7 @@
 
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-blue)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/赞助-爱发电-EA5FEE)](https://afdian.com/a/luokexiaoguo)
 
 **[中文](README.md)** | **[English](README_EN.md)**
 
@@ -230,3 +231,9 @@ Bilibili video download\
 ## 📄 许可证
 
 本项目基于 [MIT License](LICENSE) 开源。
+
+## ❤️ 赞助
+
+如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
+
+[爱发电](https://afdian.com/a/luokexiaoguo) · 邮箱：luokexiaoguo@foxmail.com

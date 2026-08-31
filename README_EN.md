@@ -2,6 +2,7 @@
 
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-blue)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/Sponsor-afdian-EA5FEE)](https://afdian.com/a/luokexiaoguo)
 
 **[中文](README.md)** | **[English](README_EN.md)**
 
@@ -199,3 +200,9 @@ This project is for learning and research purposes only. Please respect the copy
 ## 📄 License
 
 This project is open-sourced under the [MIT License](LICENSE).
+
+## ❤️ Sponsor
+
+If you find this project helpful, please consider supporting the author ☕
+
+[afdian](https://afdian.com/a/luokexiaoguo) · Email: luokexiaoguo@foxmail.com

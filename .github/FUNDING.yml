@@ -1,0 +1,4 @@
+# GitHub Sponsors / 赞助配置
+# 使用 custom 键指向爱发电（GitHub 原生不支持 afdian，custom 可填任意 URL）
+# 这会让仓库主页右侧出现 "Sponsor" 按钮。
+custom: https://afdian.com/a/luokexiaoguo
