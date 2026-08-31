@@ -20,6 +20,12 @@ Version lives in `manifest.json` (`version`). Each release bumps it and adds a c
 
 **Release pushes go ONLY to `main` (GitHub + Gitee), never `master`** — despite active development happening on `master`, release commits/tags are pushed to `main`. Keep `dist/` containing only the newest version's zip when packaging.
 
+**Sponsor links must never be dropped.** The afdian sponsor entry is intentional and permanent:
+- `.github/FUNDING.yml` — `custom: https://afdian.com/a/luokexiaoguo` (drives the "Sponsor this project" button on the GitHub repo sidebar)
+- README.md / README_EN.md — sponsor badge in the top badge row + "❤️ 赞助"/"❤️ Sponsor" section at the footer
+
+When updating READMEs (changelog, features, etc.), preserve these sponsor elements as-is. If a README rewrite or refactor removes them, restore them in the same commit. The FUNDING.yml file must always be present on `main`.
+
 ## Architecture
 
 Three-layer script architecture with Chrome's ISOLATED/MAIN world separation:
