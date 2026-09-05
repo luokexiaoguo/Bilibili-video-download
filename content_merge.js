@@ -46,7 +46,25 @@
         noStreamSave: "当前浏览器不支持流式保存",
         selectAudio: "请继续选择音频保存位置...",
         scriptFail: "脚本启动失败: ",
-        multiPartDetected: "检测到多P视频，请选择要下载的分P"
+        multiPartDetected: "检测到多P视频，请选择要下载的分P",
+        batchTitle: "批量下载 - 选择分集",
+        batchSelectAll: "全选",
+        batchSelectNone: "全不选",
+        batchStart: "开始下载",
+        batchDl: "批量下载",
+        batchPickDir: "请选择保存目录",
+        batchPickDirHint: "选择一个文件夹，所有分集将保存到此目录",
+        batchNoDir: "目录未选择",
+        batchNoDirHint: "将使用浏览器默认下载目录逐个保存",
+        batchDone: "批量完成",
+        batchEpFail: "集失败",
+        batchTooLarge: "文件较大，分轨保存",
+        batchSplit: "改为分轨保存",
+        batchNoCollection: "当前页面不是合集或多P，无法批量下载",
+        batchDirAbortFallback: "未选择保存目录。\n\n是否改用浏览器默认下载目录逐个保存？\n（与单次下载大文件音频的保存方式一致）",
+        batchDirRejectedFallback: "所选目录无法打开（可能是系统目录）。\n\n是否改用浏览器默认下载目录逐个保存？\n（与单次下载大文件音频的保存方式一致）",
+        batchNoDirPickerFallback: "当前浏览器不支持目录选择。\n\n是否改用浏览器默认下载目录逐个保存？\n（与单次下载大文件音频的保存方式一致）",
+        batchBlobTooLarge: "该集文件过大，无法在默认下载目录模式保存（会内存溢出），请选择目录后重试"
       },
       en: {
         title: "BiliDown",
@@ -83,7 +101,25 @@
         noStreamSave: "Browser does not support stream save",
         selectAudio: "Select location for AUDIO file...",
         scriptFail: "Script failed to start: ",
-        multiPartDetected: "Multi-part video detected. Select which part to download."
+        multiPartDetected: "Multi-part video detected. Select which part to download.",
+        batchTitle: "Batch Download - Select Episodes",
+        batchSelectAll: "Select All",
+        batchSelectNone: "Select None",
+        batchStart: "Start Download",
+        batchDl: "Batching",
+        batchPickDir: "Choose Save Folder",
+        batchPickDirHint: "Select a folder; all episodes will be saved here",
+        batchNoDir: "No folder selected",
+        batchNoDirHint: "Will save each to browser default download dir",
+        batchDone: "Batch Done",
+        batchEpFail: "episodes failed",
+        batchTooLarge: "large file, saving tracks separately",
+        batchSplit: "splitting instead",
+        batchNoCollection: "Current page is not a collection/multi-part, cannot batch download",
+        batchDirAbortFallback: "No save folder selected.\n\nUse browser default download dir instead?\n(Same as single-download large audio)",
+        batchDirRejectedFallback: "Selected folder cannot be opened (may be a system dir).\n\nUse browser default download dir instead?\n(Same as single-download large audio)",
+        batchNoDirPickerFallback: "Browser does not support folder selection.\n\nUse browser default download dir instead?\n(Same as single-download large audio)",
+        batchBlobTooLarge: "This episode is too large for default-dir mode (would OOM). Please select a folder and retry."
       }
     }[lang];
 
@@ -129,6 +165,17 @@
       detailDiv.style.cssText = "margin-top:8px;font-size:12px;opacity:0.8;word-break:break-all;";
       el.appendChild(detailDiv);
 
+      // 批量进度元素(默认隐藏,setBatchMode 启用)
+      const batchInfoDiv = document.createElement("div");
+      batchInfoDiv.style.cssText = "margin-top:6px;font-size:12px;color:#4cc9f0;display:none;";
+      el.appendChild(batchInfoDiv);
+      const batchBarCon = document.createElement("div");
+      batchBarCon.style.cssText = "margin-top:4px;height:4px;background:rgba(255,255,255,0.15);border-radius:2px;overflow:hidden;display:none;";
+      const batchBarDiv = document.createElement("div");
+      batchBarDiv.style.cssText = "height:100%;width:0%;background:#4cc9f0;transition:width 0.3s;";
+      batchBarCon.appendChild(batchBarDiv);
+      el.appendChild(batchBarCon);
+
       const btnArea = document.createElement("div");
       btnArea.style.cssText = "margin-top:12px;display:flex;justify-content:flex-end;gap:10px;";
       el.appendChild(btnArea);
@@ -167,7 +214,14 @@
           cancelBtn.textContent = T.cancel;
           cancelBtn.style.cssText = "background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
           cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); my.remove(); } };
-        }
+        },
+        // 批量模式:显示总进度信息 + 总进度条
+        setBatchMode: (on) => {
+          batchInfoDiv.style.display = on ? "block" : "none";
+          batchBarCon.style.display = on ? "block" : "none";
+        },
+        setBatchInfo: (txt) => { batchInfoDiv.textContent = txt; },
+        setBatchProgress: (p) => { batchBarDiv.style.width = Math.max(0, Math.min(100, p)) + "%"; }
       };
     })();
 
@@ -250,6 +304,226 @@
         cb.onclick = () => { c.remove(); resolve(null); };
         box.appendChild(list); box.appendChild(cb); c.appendChild(box); document.body.appendChild(c);
       });
+    };
+
+    // ============================================================
+    // 3b. Batch Episode Selector (多选)
+    // ============================================================
+    const showBatchSelector = (pages, currentIndex) => {
+      return new Promise(resolve => {
+        const c = document.createElement("div");
+        c.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2147483647;display:flex;align-items:center;justify-content:center;";
+        const box = document.createElement("div");
+        box.style.cssText = "background:#1f1f1f;color:#fff;padding:24px;border-radius:12px;min-width:340px;max-width:520px;max-height:85vh;overflow:auto;font-family:system-ui,sans-serif;";
+        const t = document.createElement("h3");
+        t.textContent = T.batchTitle;
+        t.style.cssText = "margin:0 0 12px 0;color:#FB7299;";
+        box.appendChild(t);
+
+        // 顶部全选/全不选按钮行
+        const topRow = document.createElement("div");
+        topRow.style.cssText = "display:flex;gap:8px;margin-bottom:12px;";
+        const setAll = (v) => { list.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = v); };
+        const btnAll = document.createElement("button");
+        btnAll.textContent = T.batchSelectAll; btnAll.style.cssText = "flex:1;padding:6px 10px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:12px;";
+        btnAll.onclick = () => setAll(true);
+        const btnNone = document.createElement("button");
+        btnNone.textContent = T.batchSelectNone; btnNone.style.cssText = "flex:1;padding:6px 10px;background:#2d2d2d;color:#fff;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:12px;";
+        btnNone.onclick = () => setAll(false);
+        topRow.appendChild(btnAll); topRow.appendChild(btnNone);
+        box.appendChild(topRow);
+
+        const list = document.createElement("div");
+        list.style.cssText = "max-height:380px;overflow-y:auto;";
+        // 默认全选
+        pages.forEach((p, i) => {
+          const row = document.createElement("label");
+          row.style.cssText = `display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:6px;background:${i===currentIndex?'rgba(251,114,153,0.12)':'#2d2d2d'};border-radius:6px;cursor:pointer;font-size:13px;`;
+          const cb = document.createElement("input");
+          cb.type = "checkbox"; cb.checked = true; cb.style.cssText = "accent-color:#FB7299;width:16px;height:16px;";
+          const n = p.part || p.title || `P${i+1}`;
+          const span = document.createElement("span");
+          span.textContent = `${i+1}. ${n}`; span.style.cssText = "flex:1;word-break:break-all;";
+          row.appendChild(cb); row.appendChild(span); list.appendChild(row);
+        });
+        box.appendChild(list);
+
+        const startBtn = document.createElement("button");
+        startBtn.textContent = T.batchStart;
+        startBtn.style.cssText = "display:block;width:100%;padding:10px 16px;margin-top:12px;background:#FB7299;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:14px;";
+        const doStart = () => {
+          const selected = [];
+          list.querySelectorAll('input[type=checkbox]').forEach((cb, i) => { if (cb.checked) selected.push(i); });
+          c.remove(); resolve(selected.length ? selected : null);
+        };
+        startBtn.onclick = doStart;
+        const cancelBtn = document.createElement("button");
+        cancelBtn.textContent = T.cancel;
+        cancelBtn.style.cssText = "display:block;width:100%;padding:8px 16px;margin-top:8px;background:transparent;border:1px solid #666;color:#aaa;border-radius:6px;cursor:pointer;";
+        cancelBtn.onclick = () => { c.remove(); resolve(null); };
+        box.appendChild(startBtn); box.appendChild(cancelBtn);
+        c.appendChild(box); document.body.appendChild(c);
+      });
+    };
+
+    // ============================================================
+    // 3c. 获取合集分集列表(用于批量下载)
+    // 对于 UGC 合集,页面 __INITIAL_STATE__ 可能只有入口 BV 的信息,
+    // 需要调 view 接口拿完整 ugc_season.sections[].episodes 列表。
+    // 返回统一结构: [{ cid, bvid?, epId?, title, isCheese? }]
+    // ============================================================
+    const getCollectionEpisodes = async () => {
+      // 优先用页面上已有的多P信息(普通多P/番剧 epList 等已在 getMultiPartInfo 里解析)
+      const mpi = getMultiPartInfo();
+      if (mpi?.pages?.length > 1) {
+        return mpi.pages.map((p, i) => ({
+          cid: String(p.cid || ''), bvid: undefined, epId: p.epId, title: p.part || p.title || `P${i+1}`
+        }));
+      }
+      // UGC 合集/series:页面 __INITIAL_STATE__ 可能没展开完整列表,
+      // 调 view 接口拿 ugc_season.sections[].episodes 或 series
+      try {
+        const m = location.pathname.match(/\/video\/(BV[\w]+)/i);
+        if (m) {
+          const bvid = m[1];
+          const r = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { credentials: "include" });
+          const j = await r.json();
+          const d = j?.data || {};
+          const eps = [];
+          // ugc_season:合集(每个分集是独立 BV)
+          if (d.ugc_season?.sections?.length) {
+            for (const s of d.ugc_season.sections) {
+              for (const ep of (s.episodes || [])) {
+                // UGC 合集每集是独立 BV,bvid 必须用 ep.bvid(不能合集入口 BV)
+                eps.push({ cid: String(ep.cid||''), bvid: ep.bvid || undefined, epId: ep.id, title: ep.title || '' });
+              }
+            }
+            if (eps.length > 1) {
+              console.log('[Batch] UGC season episodes:', eps.length, 'first ep bvid:', eps[0].bvid, 'cid:', eps[0].cid);
+              return eps;
+            }
+          }
+          // series:视频集合
+          if (!eps.length && d.series?.list?.length) {
+            for (const it of d.series.list) {
+              eps.push({ cid: String(it.cid||''), bvid: it.bvid || undefined, epId: undefined, title: it.title || '' });
+            }
+            if (eps.length > 1) return eps;
+          }
+          // 普通多P(view 接口的 pages,兜底,如果页面 __INITIAL_STATE__ 没解析到)
+          if (!eps.length && d.pages?.length > 1) {
+            d.pages.forEach((p, i) => eps.push({ cid: String(p.cid||''), bvid: bvid, epId: undefined, title: p.part || `P${i+1}` }));
+          }
+          if (eps.length > 1) return eps;
+        }
+      } catch (_) {}
+      // 番剧 ss 季
+      try {
+        const ss = location.pathname.match(/\/bangumi\/play\/ss(\d+)/i);
+        const epMatch = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
+        if (ss || epMatch) {
+          let r;
+          if (ss) {
+            r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${ss[1]}`);
+          } else {
+            // ep 入口:先拿 season_id
+            const er = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epMatch[1]}`);
+            const ej = await er.json();
+            const sid = ej?.result?.season_id;
+            if (!sid) return null;
+            r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${sid}`);
+          }
+          const j = await r.json();
+          const eps = [];
+          for (const ep of ((j?.result || {}).episodes || [])) {
+            eps.push({ cid: String(ep.cid||''), bvid: ep.bvid, epId: ep.id, title: ep.title || ep.long_title || '', isBangumi: true });
+          }
+          // 分段(正片/番外)
+          if (!eps.length && j?.result?.sections) {
+            for (const s of j.result.sections) for (const ep of (s.episodes||[])) eps.push({ cid: String(ep.cid||''), bvid: ep.bvid, epId: ep.id, title: ep.title || ep.long_title || '', isBangumi: true });
+          }
+          if (eps.length > 1) return eps;
+        }
+      } catch (_) {}
+      // cheese 课程
+      try {
+        const cheese = location.pathname.match(/\/cheese\/play\/ep(\d+)/i);
+        if (cheese) {
+          // cheese 没有简单的"列全部 ep"接口,从 __INITIAL_STATE__ 取
+          const st = window.__INITIAL_STATE__ || {};
+          const eps = (st.epList || []).map(ep => ({ cid: String(ep.cid||''), bvid: ep.bvid, epId: ep.id, title: ep.title || ep.long_title || '', isCheese: true }));
+          if (eps.length > 1) return eps;
+        }
+      } catch (_) {}
+      return null;
+    };
+
+    // ============================================================
+    // 3d. 取单集标题(用于批量命名,尽量取视频标题而非网页标题)
+    // ============================================================
+    const getEpTitle = async (ep) => {
+      if (ep.title) return ep.title;
+      try {
+        if (ep.bvid) {
+          const r = await fetchWithTimeout(`https://api.bilibili.com/x/web-interface/view?bvid=${ep.bvid}`, { credentials: "include" });
+          const j = await r.json();
+          if (j?.data?.title) return j.data.title;
+        }
+      } catch (_) {}
+      return `ep${ep.epId || ep.cid || 'unknown'}`;
+    };
+
+    // ============================================================
+    // 3e. 取单集 dash(批量专用)
+    // 关键:UGC 合集每集是独立 BV,必须用该集自己的 bvid+cid 请求 playurl,
+    // 不能用 resolveBilibili(它回退到 getBvid() 拿的是当前页面 BV)。
+    // ============================================================
+    const resolveEpisodeDash = async (ep) => {
+      const cid = ep.cid ? String(ep.cid) : undefined;
+      const epId = ep.epId ? String(ep.epId) : undefined;
+      const bvid = ep.bvid; // UGC 合集:每集独立 BV;普通多P:undefined → 用页面 BV
+
+      if (!cid && !epId) return null;
+
+      // 番剧/影视:用 pgc playurl(epId + cid)
+      if (epId && (location.pathname.includes('/bangumi/play/') || ep.isBangumi)) {
+        try {
+          let u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1`;
+          if (epId) u += `&ep_id=${epId}`;
+          if (cid) u += `&cid=${cid}`;
+          const pr = await fetchWithTimeout(u, { credentials: "include" });
+          const pj = await pr.json();
+          if (pj?.result?.dash || pj?.data?.dash) return pj.result.dash || pj.data.dash;
+        } catch (_) {}
+      }
+
+      // cheese 课程
+      if (ep.isCheese && cid) {
+        const cbvid = bvid || (location.pathname.match(/\/video\/(BV[\w]+)/i) || [])[1];
+        if (cbvid) {
+          try {
+            const u = `https://api.bilibili.com/p/player/playurl?cid=${cid}&bvid=${cbvid}&qn=120&fnval=4048&fourk=1`;
+            const pr = await fetchWithTimeout(u, { credentials: "include" });
+            const pj = await pr.json();
+            if (pj?.data?.dash) return pj.data.dash;
+          } catch (_) {}
+        }
+      }
+
+      // 普通视频 / UGC 合集:用该集自己的 bvid(如果有),否则用页面 bvid
+      if (cid) {
+        const useBvid = bvid || (location.pathname.match(/\/video\/(BV[\w]+)/i) || [])[1];
+        if (useBvid) {
+          try {
+            const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${useBvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
+            const pj = await pr.json();
+            if (pj?.data?.dash) return pj.data.dash;
+          } catch (_) {}
+        }
+      }
+
+      // 最后兜底:复用 resolveBilibili(可能 bvid 不对,但总比没有强)
+      return await resolveBilibili(cid, epId);
     };
 
     // ============================================================
@@ -1209,9 +1483,405 @@
     });
 
     // ============================================================
+    // 7b. Batch Download Flow (合集批量下载)
+    // 方案 A(目录式) + C(blob 兜底):一次 showDirectoryPicker 拿目录,
+    // 串行下载每集写入该目录;无目录句柄则退回浏览器默认下载目录逐个 blob。
+    // 不复用 streamMerge(它含 confirm 弹窗与 fire-and-forget 分流,不适合批量循环),
+    // 而是自包含实现:fetchBinBatch + FFmpeg 合并 + 写目录 / 流式分轨。
+    // ============================================================
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    const getMergeThresholdBatch = () => {
+      const memGB = navigator.deviceMemory;
+      if (!memGB) return 600 * 1024 * 1024;
+      let mb;
+      if (memGB >= 32) mb = 1800; else if (memGB >= 16) mb = 1200;
+      else if (memGB >= 8) mb = 800; else mb = 500;
+      return mb * 1024 * 1024;
+    };
+    const BATCH_MERGE_THRESHOLD = getMergeThresholdBatch();
+
+    // FFmpeg 单例(批量循环复用,避免每集重新加载 24MB WASM)
+    let _batchFFmpeg = null;
+    const loadBatchFFmpeg = async () => {
+      if (_batchFFmpeg) return _batchFFmpeg;
+      const ffmpegUrl = window.__FFMPEG_URL__;
+      if (ffmpegUrl && !window.FFmpeg) {
+        await Promise.race([
+          new Promise((res, rej) => {
+            const s = document.createElement("script");
+            s.src = ffmpegUrl;
+            s.onload = () => { console.log("[Batch FFmpeg] ffmpeg.min.js loaded"); res(); };
+            s.onerror = () => rej(new Error("ffmpeg.min.js failed"));
+            (document.head || document.documentElement).appendChild(s);
+          }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("ffmpeg.min.js load timeout")), 15000))
+        ]);
+      }
+      if (!window.FFmpeg?.createFFmpeg) throw new Error("FFmpeg library not loaded");
+
+      const requestFFmpegFromSW = () => new Promise((resolve, reject) => {
+        const requestId = 'ffmpeg_batch_' + Date.now();
+        const timeout = setTimeout(() => { window.removeEventListener('BILI_FFMPEG_RESPONSE', handler); reject(new Error("FFmpeg request timeout")); }, 25000);
+        const handler = (e) => {
+          if (e.detail?.requestId !== requestId) return;
+          clearTimeout(timeout);
+          window.removeEventListener('BILI_FFMPEG_RESPONSE', handler);
+          if (e.detail?.success) resolve({ files: e.detail.files, extId: e.detail.extId });
+          else reject(new Error("SW error: " + (e.detail?.error || "unknown")));
+        };
+        window.addEventListener('BILI_FFMPEG_RESPONSE', handler);
+        window.dispatchEvent(new CustomEvent("BILI_TRIGGER_FFMPEG", { detail: { requestId } }));
+      });
+      const { files, extId } = await Promise.race([
+        requestFFmpegFromSW(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("SW request timeout")), 20000))
+      ]);
+      if (!files?.length || !extId) throw new Error("No FFmpeg files or extension ID from SW");
+      const useMT = !!window.SharedArrayBuffer;
+      const corePath = useMT ? 'ffmpeg/ffmpeg-core.js' : (files.find(f => f.path === 'ffmpeg/ffmpeg-core-st.js') ? 'ffmpeg/ffmpeg-core-st.js' : 'ffmpeg/ffmpeg-core.js');
+      const wasmPath = useMT ? 'ffmpeg/ffmpeg-core.wasm' : (files.find(f => f.path === 'ffmpeg/ffmpeg-core-st.wasm') ? 'ffmpeg/ffmpeg-core-st.wasm' : 'ffmpeg/ffmpeg-core.wasm');
+      console.log("[Batch FFmpeg] Using", useMT ? "MT" : "ST", "core");
+      const ffmpeg = window.FFmpeg.createFFmpeg({
+        corePath: `chrome-extension://${extId}/${corePath}`,
+        wasmPath: `chrome-extension://${extId}/${wasmPath}`,
+        log: true
+      });
+      await Promise.race([ffmpeg.load(), new Promise((_, rej) => setTimeout(() => rej(new Error("ffmpeg.load() timeout")), 30000))]);
+      console.log("[Batch FFmpeg] loaded OK");
+      _batchFFmpeg = ffmpeg;
+      return _batchFFmpeg;
+    };
+
+    // 下载到内存(带进度),逻辑同 streamMerge.fetchBin
+    const fetchBinBatch = async (urls, label) => {
+      if (!Array.isArray(urls)) urls = [urls];
+      let lastError = null;
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        try {
+          let res;
+          try {
+            res = await fetch(url, { credentials: "include", referrer: location.href, referrerPolicy: "strict-origin-when-cross-origin", signal });
+            if (res?.status === 403 || !res?.ok) res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+          } catch (e) {
+            res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+          }
+          if (!res?.ok || !res?.body) throw new Error(`${label} fetch failed, status: ${res?.status}`);
+          const total = Number(res.headers.get("content-length")) || 0;
+          if (total > 0 && total > BATCH_MERGE_THRESHOLD) throw new Error(`FILE_TOO_LARGE:${label}:${total}`);
+          const reader = res.body.getReader();
+          const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
+          while (true) {
+            if (signal.aborted) throw new Error("Aborted");
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value); loaded += value.length;
+            const now = performance.now();
+            if (now - lastUpd > 200) {
+              lastUpd = now;
+              const elapsed = (now - start) / 1000;
+              const pct = total ? (loaded / total) * 100 : 0;
+              overlay.setDetail(`${label}: ${fmtBytes(loaded)}/${fmtBytes(total)} (${fmtBytes(loaded/Math.max(0.1,elapsed))}/s) ${pct.toFixed(0)}%`);
+            }
+          }
+          const buf = new Uint8Array(loaded);
+          let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+          return buf;
+        } catch (e) {
+          lastError = e;
+          if (signal.aborted) throw e;
+        }
+      }
+      throw lastError || new Error(`${label} fetch failed`);
+    };
+
+    // 写入目录(或 blob 兜底)
+    const writeToDir = async (dirHandle, name, data) => {
+      if (dirHandle) {
+        try {
+          const fh = await dirHandle.getFileHandle(name, { create: true });
+          const w = await fh.createWritable();
+          await w.write(data);
+          await w.close();
+          return true;
+        } catch (e) { console.warn('[Batch] dir write failed, blob fallback:', name, e); }
+      }
+      saveBlob(data, name);
+      return false;
+    };
+
+    // 流式写入目录(大文件边下边写,避免 OOM);无目录则读入内存 blob 兜底
+    const streamToDir = async (urls, dirHandle, name, label) => {
+      if (!Array.isArray(urls)) urls = [urls];
+      for (const url of urls) {
+        try {
+          if (signal.aborted) throw new Error("Aborted");
+          let res;
+          try {
+            res = await fetch(url, { credentials: "include", referrer: location.href, referrerPolicy: "strict-origin-when-cross-origin", signal });
+            if (res?.status === 403 || !res?.ok) res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+          } catch (e) {
+            res = await fetch(url, { credentials: "omit", referrer: "https://www.bilibili.com/", referrerPolicy: "strict-origin-when-cross-origin", signal });
+          }
+          const total = Number(res.headers.get("content-length")) || 0;
+          if (!res.ok || !res.body) continue;
+          let writable = null;
+          if (dirHandle) {
+            const fh = await dirHandle.getFileHandle(name, { create: true });
+            writable = await fh.createWritable();
+          }
+          const reader = res.body.getReader();
+          const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
+          while (true) {
+            if (signal.aborted) { try { await writable?.abort(); } catch (_) {} throw new Error("Aborted"); }
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (writable) await writable.write(value);
+            else chunks.push(value);
+            loaded += value.length;
+            const now = performance.now();
+            if (now - lastUpd > 200) {
+              lastUpd = now;
+              const elapsed = (now - start) / 1000;
+              const pct = total ? (loaded / total) * 100 : 0;
+              _prog.v = `${label}: ${fmtBytes(loaded)}/${fmtBytes(total)} ${pct.toFixed(0)}%`;
+              _updateDetail();
+            }
+          }
+          if (writable) { await writable.close(); }
+          else {
+            const buf = new Uint8Array(loaded);
+            let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+            saveBlob(buf, name);
+          }
+          _prog.v = `${label}: ✓`; _updateDetail();
+          return true;
+        } catch (e) {
+          if (e?.message === 'Aborted' || signal.aborted) throw e;
+          console.warn(`[Batch] stream ${label} URL failed:`, e);
+        }
+      }
+      return false;
+    };
+
+    // HEAD/Range 探测单轨道大小
+    const probeSizeBatch = async (url) => {
+      try {
+        const r = await fetch(url, { method: 'HEAD', credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+        if (r.ok) { const cl = Number(r.headers.get('content-length')); if (cl) return cl; }
+      } catch (_) {}
+      try {
+        const r = await fetch(url, { headers: { 'Range': 'bytes=0-0' }, credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
+        if (r.ok || r.status === 206) { const cr = r.headers.get('content-range'); if (cr) { const m = cr.match(/\/(\d+)/); if (m) return Number(m[1]); } }
+      } catch (_) {}
+      return 0;
+    };
+
+    // 下载单集到目录(或 blob 兜底)。返回 true=成功 false=失败
+    const batchDownloadEpisode = async (ep, epIdx, total, dirHandle, collectionTitle) => {
+      overlay.setBatchInfo(`${T.batchDl}: ${epIdx+1}/${total} - ${ep.title || ''}`);
+      overlay.setBatchProgress(Math.round(epIdx / total * 100));
+      overlay.setProgress(0);
+
+      // 1. 解析 dash
+      overlay.setStep(T.parse);
+      let dash;
+      try {
+        dash = await Promise.race([resolveEpisodeDash(ep), new Promise((_, r) => setTimeout(() => r(new Error("超时")), 15000))]);
+      } catch (e) { console.warn('[Batch] resolve failed:', ep.title, e); return false; }
+      if (!dash?.video?.length || !dash?.audio?.length) { console.warn('[Batch] no dash:', ep.title); return false; }
+
+      // 2. 选轨
+      const vUrl = pickBestVideo(dash.video, preferHDR);
+      const aPick = pickBestAudio(dash.audio);
+      const aUrl = aPick.url;
+      const vTrack = (dash.video || []).find(x => (x.baseUrl||x.base_url||x.url) === vUrl) || dash.video[0];
+      let vAllUrls = getAllUrls(vTrack);
+      const vPool = (dash.video || []).filter(x => preferHDR ? isHdr(x) : !isHdr(x));
+      for (const t of vPool) for (const u of getAllUrls(t)) if (!vAllUrls.includes(u)) vAllUrls.push(u);
+      let aAllUrls = aPick.urls?.length ? aPick.urls : getAllUrls(aPick.track || dash.audio[0]);
+      for (const t of dash.audio || []) for (const u of getAllUrls(t)) if (!aAllUrls.includes(u)) aAllUrls.push(u);
+      if (!vUrl || !aUrl) return false;
+
+      // 3. 文件名
+      const epTitle = await getEpTitle(ep);
+      const base = safeName(collectionTitle || 'bilibili');
+      const fname = `${base}_P${epIdx+1}_${safeName(epTitle)}`;
+
+      // 4. 探测大小
+      const [vSize, aSize] = await Promise.all([probeSizeBatch(vUrl).catch(()=>0), probeSizeBatch(aUrl).catch(()=>0)]);
+      const estTotal = vSize + aSize;
+
+      // 4b. blob 兜底模式(无目录句柄)下,大文件没法流式写盘(a.download 需要完整 Blob),
+      //    硬读内存会 OOM。改为跳过 + 提示用户选目录。
+      if (!dirHandle && estTotal > 0 && estTotal > BATCH_MERGE_THRESHOLD) {
+        overlay.setStep(T.batchTooLarge);
+        overlay.setDetail(T.batchBlobTooLarge);
+        console.warn('[Batch] ep too large for blob fallback, skipping:', ep.title, fmtBytes(estTotal));
+        return false;
+      }
+
+      // 5a. 大文件 → 分轨流式写入目录(仅 dirHandle 模式;blob 模式已在 4b 拦截)
+      if (estTotal > 0 && estTotal > BATCH_MERGE_THRESHOLD) {
+        overlay.setStep(T.batchTooLarge);
+        _prog.v = ''; _prog.a = '';
+        const vOk = await streamToDir(vAllUrls, dirHandle, `${T.video}-${fname}.mp4`, T.video);
+        if (signal.aborted) throw new Error("Aborted");
+        const aOk = await streamToDir(aAllUrls, dirHandle, `${T.audio}-${fname}.m4a`, T.audio);
+        return vOk && aOk;
+      }
+
+      // 5b. 小文件 → 内存合并
+      overlay.setStep(`${T.dlStep}${T.video}...`);
+      let vBin, aBin;
+      try {
+        vBin = await fetchBinBatch(vAllUrls, T.video);
+        overlay.setStep(`${T.dlStep}${T.audio}...`);
+        aBin = await fetchBinBatch(aAllUrls, T.audio);
+      } catch (e) {
+        if (e?.message === 'Aborted' || signal.aborted) throw e;
+        console.warn('[Batch] fetchBin failed, splitting:', e);
+        // 无目录句柄时不能流式分轨(会 OOM),跳过该集
+        if (!dirHandle) {
+          overlay.setStep(T.batchTooLarge);
+          overlay.setDetail(T.batchBlobTooLarge);
+          return false;
+        }
+        const vOk = await streamToDir(vAllUrls, dirHandle, `${T.video}-${fname}.mp4`, T.video);
+        if (signal.aborted) throw new Error("Aborted");
+        const aOk = await streamToDir(aAllUrls, dirHandle, `${T.audio}-${fname}.m4a`, T.audio);
+        return vOk && aOk;
+      }
+
+      // 实际大小超阈值 → 分轨写(此时数据已在内存,writeToDir 不再累积)
+      if (vBin.byteLength + aBin.byteLength > BATCH_MERGE_THRESHOLD) {
+        overlay.setStep(T.batchTooLarge);
+        const vOk = await writeToDir(dirHandle, `${T.video}-${fname}.mp4`, vBin);
+        const aOk = await writeToDir(dirHandle, `${T.audio}-${fname}.m4a`, aBin);
+        vBin = null; aBin = null;
+        return vOk && aOk;
+      }
+
+      // FFmpeg 合并
+      overlay.setStep(T.merge); overlay.setProgress(85);
+      try {
+        const ffmpeg = await loadBatchFFmpeg();
+        ffmpeg.FS("writeFile", "v.m4s", vBin);
+        ffmpeg.FS("writeFile", "a.m4s", aBin);
+        await ffmpeg.run("-i", "v.m4s", "-i", "a.m4s", "-c", "copy", "out.mp4");
+        const out = ffmpeg.FS("readFile", "out.mp4");
+        ffmpeg.FS("unlink", "out.mp4"); ffmpeg.FS("unlink", "v.m4s"); ffmpeg.FS("unlink", "a.m4s");
+        vBin = null; aBin = null;
+        await writeToDir(dirHandle, `${fname}.mp4`, out);
+        return true;
+      } catch (e) {
+        if (e?.message === 'Aborted' || signal.aborted) throw e;
+        console.warn('[Batch] merge failed, splitting:', e);
+        // 清理 FFmpeg FS 残留文件,避免下集复用单例时脏数据
+        try { _batchFFmpeg?.FS("unlink", "out.mp4"); } catch (_) {}
+        try { _batchFFmpeg?.FS("unlink", "v.m4s"); } catch (_) {}
+        try { _batchFFmpeg?.FS("unlink", "a.m4s"); } catch (_) {}
+        if (vBin && aBin) {
+          await writeToDir(dirHandle, `${T.video}-${fname}.mp4`, vBin);
+          await writeToDir(dirHandle, `${T.audio}-${fname}.m4a`, aBin);
+          vBin = null; aBin = null;
+          return true;
+        }
+        return false;
+      }
+    };
+
+    // 批量下载主流程
+    const runBatch = async () => {
+      overlay.setBatchMode(true);
+      overlay.setStep(T.parse);
+
+      // 1. 获取分集列表
+      const episodes = await getCollectionEpisodes();
+      if (!episodes || episodes.length < 2) {
+        overlay.setStep(T.errTitle);
+        overlay.setDetail(T.batchNoCollection);
+        overlay.done();
+        setTimeout(() => overlay.remove(), 4000);
+        return;
+      }
+
+      // 2. 多选分集
+      const mpi = getMultiPartInfo();
+      const selected = await showBatchSelector(
+        episodes.map((ep) => ({ part: ep.title, cid: ep.cid, epId: ep.epId })),
+        mpi?.currentIndex || 0
+      );
+      if (!selected || !selected.length) { overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return; }
+
+      // 3. 选择目录(必须在用户手势链内 —— 此处仍在 popup 点击注入的激活窗口中)
+      // 选不了/取消 → 不直接失败,改走 blob 兜底(文件进浏览器默认下载目录)
+      let dirHandle = null;
+      if (window.showDirectoryPicker) {
+        try {
+          dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          console.log('[Batch] dirHandle:', dirHandle.name);
+        } catch (e) {
+          if (e?.name === 'AbortError') {
+            // 用户取消目录选择 → 询问是否改用默认下载目录
+            const goBlob = confirm(T.batchDirAbortFallback);
+            if (!goBlob) { overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return; }
+            // 继续走 blob 兜底(dirHandle 保持 null)
+          } else {
+            // 系统目录等拒绝 → 询问是否改用默认下载目录
+            console.warn('[Batch] dir picker rejected:', e);
+            const goBlob = confirm(T.batchDirRejectedFallback);
+            if (!goBlob) { overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return; }
+          }
+        }
+      } else {
+        // 浏览器不支持 showDirectoryPicker,直接 blob 兜底
+        const goBlob = confirm(T.batchNoDirPickerFallback);
+        if (!goBlob) { overlay.setStep(T.canceled); setTimeout(() => overlay.remove(), 2000); return; }
+      }
+      overlay.setDetail(dirHandle ? `${T.batchPickDir}: ${dirHandle.name}` : T.batchNoDirHint);
+
+      // 4. 合集标题(用于命名)
+      let collectionTitle = null;
+      try { collectionTitle = window.__INITIAL_STATE__?.videoData?.title || window.__INITIAL_STATE__?.h1Title; } catch (_) {}
+      if (!collectionTitle) collectionTitle = document.title?.replace('_bilibili', '') || 'bilibili';
+
+      // 5. 串行下载(集间间隔 1.5s 防风控)
+      let ok = 0, fail = 0;
+      for (let i = 0; i < selected.length; i++) {
+        if (signal.aborted) break;
+        const epIdx = selected[i];
+        const ep = episodes[epIdx];
+        try {
+          const success = await batchDownloadEpisode(ep, i, selected.length, dirHandle, collectionTitle);
+          if (success) ok++; else fail++;
+        } catch (e) {
+          if (e?.message === 'Aborted' || signal.aborted) break;
+          console.warn('[Batch] episode failed:', ep?.title, e);
+          fail++;
+        }
+        if (i < selected.length - 1 && !signal.aborted) await sleep(1500);
+      }
+
+      // 6. 完成
+      overlay.setBatchProgress(100);
+      overlay.setProgress(100);
+      overlay.setStep(T.batchDone);
+      overlay.setDetail(fail === 0 ? `${ok}/${selected.length}` : `${ok}/${selected.length} (${fail} ${T.batchEpFail})`);
+      overlay.done();
+    };
+
+    // ============================================================
     // 8. Main Flow
     // ============================================================
     overlay.setStep(T.parse);
+
+    // 批量模式:走合集批量流程,跳过单次下载
+    if (window.__BILI_BATCH__) {
+      await runBatch();
+      return;
+    }
 
     const mpi = getMultiPartInfo();
     let selIdx = 0, selPage = null;

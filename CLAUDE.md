@@ -108,6 +108,17 @@ Large files (>threshold) are split into separate video/audio downloads instead o
 - **Progress throttling**: `fetchBin` updates `overlay.setDetail` at most every 200ms (matching `streamWithProgress`) to avoid high-frequency DOM writes on small chunks.
 - `saveBlob` revokes its object URL after 120s; FFmpeg FS files are `unlink`ed after merge.
 
+### Batch Download (合集下载)
+
+A second popup button (`#batch`) sets `window.__BILI_BATCH__ = true` before injecting `content_merge.js`, which branches into `runBatch()` instead of the single-download flow. Batch download grabs all episodes of a collection/multi-part and downloads them serially into one user-chosen directory.
+
+- **Episode discovery** (`getCollectionEpisodes`): unifies UGC合集 (`ugc_season.sections[].episodes`, each ep is an **independent BV**), series, regular multi-P (`pages`), bangumi (`ss`/`ep` season endpoints), and cheese (`epList`). Returns `[{cid, bvid, epId, title, isBangumi?, isCheese?}]`.
+- **Per-episode dash** (`resolveEpisodeDash`): MUST use each episode's own `bvid` (UGC合集) — calling `resolveBilibili` directly falls back to `getBvid()` which returns the collection's entry BV, causing bvid/cid mismatch → 412. Routes to `pgc/player/web/playurl` for bangumi, `p/player/playurl` for cheese, `x/player/playurl` otherwise.
+- **Save mode**: `showDirectoryPicker({mode:'readwrite'})` once in the user-gesture window → all episodes write into that directory. If the picker is cancelled/rejected (system dir)/unsupported → confirm dialog → fall back to `saveBlob` per file into the browser default download dir. **Large episodes (>threshold) are skipped in blob mode** (would OOM); only the directory mode can stream-split large episodes.
+- **Per-episode logic** (`batchDownloadEpisode`): probe size → small files merge in memory via a reused FFmpeg singleton (`_batchFFmpeg`, loaded once across the batch); large files stream-split to video.mp4 + audio.m4a in the same dir. FFmpeg FS files are `unlink`ed after each episode (including on failure) to prevent stale-data bleed across the singleton.
+- **Throttling**: serial loop with `await sleep(1500)` between episodes to avoid playurl 412 风控. All fetches share one `AbortController`/`signal` from the overlay.
+- **Overlay**: `setBatchMode(true)` reveals a second progress line (`setBatchInfo` "第 N/M 集") + a total-progress bar (`setBatchProgress`), independent of the per-episode detail/progress line.
+
 ### URL Pattern Support
 
 The extension supports three URL patterns on bilibili.com:
@@ -146,9 +157,9 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 
 - `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. 4 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds); `useMT` picks between them. If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`. The ST core must be a real ST build — a fake ST (byte-identical to MT) silently breaks first-merge / post-restart downloads.
-- `content_merge.js` — Largest file (~1300 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display. Starts with a `__BILI_DRIVER_ACTIVE__` re-injection guard.
+- `content_merge.js` — Largest file (~1900 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display, single-download flow + batch-download flow. Starts with a `__BILI_DRIVER_ACTIVE__` re-injection guard. Batch branch is gated by `window.__BILI_BATCH__`.
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
-- `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version.
-- `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`.
+- `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version. Still serves FFmpeg file HEAD-verification + extension ID to the bridge.
+- `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`. The batch button sets `window.__BILI_BATCH__ = true` the same way.
 - `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); the actual source (`worker.js`, `wrangler.toml`, `api/activate.js`, `api/claim-api.js`, `api/status.js`, `vercel.json`) lives on the `activation-system` branch.
 - Root `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md` — unrelated poster-generation tooling, not part of the extension; ignore.

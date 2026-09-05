@@ -14,6 +14,7 @@
 - **SDR Priority**: Automatically excludes HDR / Dolby Vision tracks, downloading only SDR (709) videos.
 - **Codec Priority**: Prefers H.265 (HEVC) in SDR tracks, otherwise falls back to H.264 (AVC).
 - **Anime Support**: Full support for parsing and downloading Bilibili Anime, Movies, and other Bangumi content.
+- **Collection Batch Download**: A new "Batch Download Collection" button lists all episodes of a collection/multi-part for one-click selection, then downloads them serially into a single folder. Supports UGC collections, video series, regular multi-part, anime seasons, and courses (cheese).
 - **Resumable Downloads**: No worries about network fluctuations; supports pausing and resuming download tasks.
 - **Local Merge**: Built-in FFmpeg (Wasm) merges audio and video tracks directly within the browser after download, outputting an MP4 file.
 - **Smart Naming**: Saves as `Video-First10CharsOfTitle.mp4` / `Audio-First10CharsOfTitle.m4a` (automatically cleans emoji and other abnormal characters; uses video title, not page title).
@@ -92,7 +93,8 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
-### v1.2.15 (2026-08-19)
+### v1.2.15 (2026-09-05)
+- **New**: Collection batch download. A new "Batch Download Collection" button lists all episodes of a collection/multi-part for one-click selection, then downloads them serially into a single folder. Supports UGC collections, video series, regular multi-part, anime seasons, and courses (cheese). Small files auto-merge to MP4; large files auto-split into separate tracks. FFmpeg is reused across episodes; throttling between episodes prevents rate-limiting.
 - **Fix**: Split downloads now save audio to the same folder as the video (two save dialogs, matching the tips) instead of the browser's default download folder.
 - **Fix**: Cancelling a split download no longer hangs the overlay.
 - **Optimize**: Added a re-injection guard to prevent overlay/listener accumulation (memory leak) on repeated downloads.

@@ -11,6 +11,8 @@ const I18N = {
     lblHdr: "HDR / 杜比",
     descHdr: "色彩生动 专用",
     btnDownload: "一键下载（最高支持8K）",
+    btnBatch: "批量下载合集",
+    batchUnsupported: "当前页面不是合集/多P,无法批量下载",
     footerEmail: "反馈邮箱：",
     footerFeedback: "插件制作不易，如果它确实帮到了你，希望能支持一下，让我有动力持续更新！",
     linkSupport: "支持",
@@ -30,6 +32,8 @@ const I18N = {
     lblHdr: "HDR / Dolby",
     descHdr: "Vivid Colors",
     btnDownload: "One-Click Download (Max 8K)",
+    btnBatch: "Batch Download Collection",
+    batchUnsupported: "Current page is not a collection/multi-part, cannot batch download",
     footerFeedback: "This extension is hard to make. If it has truly helped you, I hope you can support me — it gives me the motivation to keep updating!",
     footerEmail: "Feedback: ",
     linkSupport: "Support",
@@ -129,6 +133,69 @@ document.getElementById("send").addEventListener("click", async () => {
     msg.textContent = t.msgStart;
   } catch (e) {
     console.error('[Popup] Error:', e);
+    msg.textContent = t.msgError + (e && e.message ? e.message : "Unknown Error");
+  }
+});
+
+// 批量下载:复用单次下载的注入流程,只是多注入一个 __BILI_BATCH__ 标志,
+// content_merge.js 检测到该标志后进入批量流程(目录选择器 + 串行下载多集)。
+document.getElementById("batch").addEventListener("click", async () => {
+  const msg = document.getElementById("msg");
+  const t = I18N[currentLang];
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url || !/bilibili\.com\/(video|bangumi\/play|cheese\/play)\//i.test(tab.url)) {
+      msg.textContent = t.msgPageError;
+      return;
+    }
+
+    const quality = document.querySelector('input[name="video_quality"]:checked').value;
+    const preferHDR = quality === 'hdr';
+
+    const ffmpegUrl = chrome.runtime.getURL("ffmpeg/ffmpeg.min.js");
+    const coreUrl = chrome.runtime.getURL("ffmpeg/ffmpeg-core.js");
+    const coreStUrl = chrome.runtime.getURL("ffmpeg/ffmpeg-core-st.js");
+
+    console.log('[Popup] Starting BATCH injection, preferHDR:', preferHDR);
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content_bridge.js"],
+      world: "ISOLATED"
+    });
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (ffmpeg, core, coreSt, lang, hdr) => {
+        window.__FFMPEG_URL__ = ffmpeg;
+        window.__FFMPEG_CORE_URL__ = core;
+        window.__FFMPEG_CORE_ST_URL__ = coreSt;
+        window.__BILI_LANG__ = lang;
+        window.__BILI_DOWN_PREF__ = { preferHDR: hdr };
+        // 批量下载标志:content_merge.js 据此走批量流程而非单次流程
+        window.__BILI_BATCH__ = true;
+        console.log('[Popup->Content] BATCH mode set');
+      },
+      args: [ffmpegUrl, coreUrl, coreStUrl, currentLang, preferHDR],
+      world: "MAIN"
+    });
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["ffmpeg/ffmpeg.min.js"],
+      world: "MAIN"
+    });
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content_merge.js"],
+      world: "MAIN"
+    });
+
+    await chrome.storage.local.remove("vd_status");
+    msg.textContent = t.msgStart;
+  } catch (e) {
+    console.error('[Popup] Batch error:', e);
     msg.textContent = t.msgError + (e && e.message ? e.message : "Unknown Error");
   }
 });
