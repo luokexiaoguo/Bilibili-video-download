@@ -93,6 +93,9 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.16 (2026-09-10)
+- **Fix**: Batch download filenames no longer leak the currently-playing episode title. Collection name is now taken from the API's collection field (`ugc_season.title` / bangumi season title, etc.), not page state or `document.title` (both reflect the currently-playing episode).
+
 ### v1.2.15 (2026-09-05)
 - **New**: Collection batch download. A new "Batch Download Collection" button lists all episodes of a collection/multi-part for one-click selection, then downloads them serially into a single folder. Supports UGC collections, video series, regular multi-part, anime seasons, and courses (cheese). Small files auto-merge to MP4; large files auto-split into separate tracks. FFmpeg is reused across episodes; throttling between episodes prevents rate-limiting.
 - **Fix**: Split downloads now save audio to the same folder as the video (two save dialogs, matching the tips) instead of the browser's default download folder.

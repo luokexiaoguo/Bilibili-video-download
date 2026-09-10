@@ -370,12 +370,23 @@
     // 3c. 获取合集分集列表(用于批量下载)
     // 对于 UGC 合集,页面 __INITIAL_STATE__ 可能只有入口 BV 的信息,
     // 需要调 view 接口拿完整 ugc_season.sections[].episodes 列表。
-    // 返回统一结构: [{ cid, bvid?, epId?, title, isCheese? }]
+    // 返回 { episodes: [{cid,bvid?,epId?,title,isBangumi?,isCheese?}], title }
+    // title = 合集名(不是当前播放集标题),用于文件命名
     // ============================================================
+    let _batchCollectionTitle = null; // getCollectionEpisodes 写入,runBatch 读取
     const getCollectionEpisodes = async () => {
+      _batchCollectionTitle = null;
       // 优先用页面上已有的多P信息(普通多P/番剧 epList 等已在 getMultiPartInfo 里解析)
       const mpi = getMultiPartInfo();
       if (mpi?.pages?.length > 1) {
+        // 合集名:UGC合集用 ugc_season.title;普通多P用 videoData.title(视频本身);番剧用 mediaInfo.title
+        try {
+          const st = window.__INITIAL_STATE__ || {};
+          _batchCollectionTitle = st.videoData?.ugc_season?.title
+            || st.videoData?.title
+            || st.mediaInfo?.title
+            || null;
+        } catch (_) {}
         return mpi.pages.map((p, i) => ({
           cid: String(p.cid || ''), bvid: undefined, epId: p.epId, title: p.part || p.title || `P${i+1}`
         }));
@@ -392,6 +403,8 @@
           const eps = [];
           // ugc_season:合集(每个分集是独立 BV)
           if (d.ugc_season?.sections?.length) {
+            // 合集名:ugc_season.title 是合集名(如"世界奇葩史"),不是某集标题
+            _batchCollectionTitle = d.ugc_season.title || d.title || null;
             for (const s of d.ugc_season.sections) {
               for (const ep of (s.episodes || [])) {
                 // UGC 合集每集是独立 BV,bvid 必须用 ep.bvid(不能合集入口 BV)
@@ -399,12 +412,13 @@
               }
             }
             if (eps.length > 1) {
-              console.log('[Batch] UGC season episodes:', eps.length, 'first ep bvid:', eps[0].bvid, 'cid:', eps[0].cid);
+              console.log('[Batch] UGC season:', _batchCollectionTitle, '| episodes:', eps.length, '| first ep bvid:', eps[0].bvid, 'cid:', eps[0].cid);
               return eps;
             }
           }
           // series:视频集合
           if (!eps.length && d.series?.list?.length) {
+            _batchCollectionTitle = d.series?.title || d.title || null;
             for (const it of d.series.list) {
               eps.push({ cid: String(it.cid||''), bvid: it.bvid || undefined, epId: undefined, title: it.title || '' });
             }
@@ -412,6 +426,7 @@
           }
           // 普通多P(view 接口的 pages,兜底,如果页面 __INITIAL_STATE__ 没解析到)
           if (!eps.length && d.pages?.length > 1) {
+            _batchCollectionTitle = d.title || null;
             d.pages.forEach((p, i) => eps.push({ cid: String(p.cid||''), bvid: bvid, epId: undefined, title: p.part || `P${i+1}` }));
           }
           if (eps.length > 1) return eps;
@@ -434,6 +449,7 @@
             r = await fetchWithTimeout(`https://api.bilibili.com/pgc/view/web/season?season_id=${sid}`);
           }
           const j = await r.json();
+          _batchCollectionTitle = j?.result?.title || j?.result?.season_title || null;
           const eps = [];
           for (const ep of ((j?.result || {}).episodes || [])) {
             eps.push({ cid: String(ep.cid||''), bvid: ep.bvid, epId: ep.id, title: ep.title || ep.long_title || '', isBangumi: true });
@@ -451,6 +467,7 @@
         if (cheese) {
           // cheese 没有简单的"列全部 ep"接口,从 __INITIAL_STATE__ 取
           const st = window.__INITIAL_STATE__ || {};
+          _batchCollectionTitle = st.videoData?.title || st.epInfo?.title || null;
           const eps = (st.epList || []).map(ep => ({ cid: String(ep.cid||''), bvid: ep.bvid, epId: ep.id, title: ep.title || ep.long_title || '', isCheese: true }));
           if (eps.length > 1) return eps;
         }
@@ -1842,10 +1859,15 @@
       }
       overlay.setDetail(dirHandle ? `${T.batchPickDir}: ${dirHandle.name}` : T.batchNoDirHint);
 
-      // 4. 合集标题(用于命名)
-      let collectionTitle = null;
-      try { collectionTitle = window.__INITIAL_STATE__?.videoData?.title || window.__INITIAL_STATE__?.h1Title; } catch (_) {}
-      if (!collectionTitle) collectionTitle = document.title?.replace('_bilibili', '') || 'bilibili';
+      // 4. 合集标题(用于命名) —— 由 getCollectionEpisodes 写入 _batchCollectionTitle
+      //    这是合集/季名(如"世界奇葩史"),不是当前播放集标题
+      let collectionTitle = _batchCollectionTitle;
+      if (!collectionTitle) {
+        // 兜底:_batchCollectionTitle 没拿到时,用 BV/season 号,绝不用 document.title
+        const bvMatch = location.pathname.match(/\/video\/(BV[\w]+)/i);
+        const ssMatch = location.pathname.match(/\/bangumi\/play\/ss(\d+)/i);
+        collectionTitle = bvMatch ? bvMatch[1] : (ssMatch ? `ss${ssMatch[1]}` : 'bilibili');
+      }
 
       // 5. 串行下载(集间间隔 1.5s 防风控)
       let ok = 0, fail = 0;
