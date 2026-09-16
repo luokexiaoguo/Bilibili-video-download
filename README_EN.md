@@ -8,6 +8,8 @@
 
 **BiliDown** is a browser extension for Microsoft Edge and Google Chrome, focused on providing a high-quality downloading experience for Bilibili videos, anime, and movies. It utilizes the WebAssembly version of FFmpeg to merge audio and video locally, ensuring privacy and security without uploading data to third-party servers.
 
+> 💡 **Quick Install**: Available on the **Edge / Chrome Web Store** — search for "**BiliDown**" (B站离线舱) to install in one click.
+
 ## ✨ Features
 
 - **HD Download**: Supports downloading Bilibili 4K, 1080P+, and other high-definition videos.
