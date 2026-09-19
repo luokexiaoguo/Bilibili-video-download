@@ -95,6 +95,15 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.17 (2026-09-19)
+- **Fix**: Split-download audio no longer falls into the browser's default download folder on long videos. Root cause: the OK click on a native confirm dialog does not grant the page user activation, so the second save picker was rejected with SecurityError. Confirmation now uses an in-page overlay dialog (a real button click), so the audio picker always opens and both tracks land in the same folder.
+- **Fix**: A mid-stream audio failure no longer leaves a 0-byte file in the chosen folder. Partial writes are discarded (`writable.abort()`), the next CDN mirror is retried, and blob fallback (with an explicit notice) happens only after all mirrors fail.
+- **New**: CDN stall watchdog. Every download stream aborts and retries the next mirror after 60s without progress — no more downloads freezing forever mid-way with no error.
+- **New**: Memory guard for chunked (no Content-Length) transfers — large files switch to split download as soon as the byte count crosses the threshold, instead of OOM-ing after finishing.
+- **New**: Diagnosable resolve failures. Bilibili rate-limiting (412) now shows a clear "retry in 1-2 minutes" message; direct-link (durl) videos download as a plain mp4 instead of a generic "video info not found".
+- **Optimize**: The large-file split confirmation now shows the real size (e.g. "about 3.6 GB") and reads as guidance instead of an error.
+- **Optimize**: When the save-location gesture expires, a "Choose Save Location" retry button appears instead of a silent fallback to the default download dir.
+
 ### v1.2.16 (2026-09-10)
 - **Fix**: Batch download filenames no longer leak the currently-playing episode title. Collection name is now taken from the API's collection field (`ugc_season.title` / bangumi season title, etc.), not page state or `document.title` (both reflect the currently-playing episode).
 

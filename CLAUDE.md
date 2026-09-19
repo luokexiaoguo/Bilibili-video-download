@@ -12,19 +12,23 @@ This is an **unpacked extension** — no build step needed. Load the root direct
 
 **Critical**: Do NOT create directories starting with `_` in the project root (except `_locales`). Chrome rejects extensions with such directories (`__pycache__` etc). Note: `_metadata/` appears at root after loading — that's Chrome's own generated file, gitignored, leave it alone.
 
-There is no linter, formatter, or test suite configured.
+There is no linter, formatter, or test suite configured. The only automated check available is `node --check <file>` (syntax validation) — run it on every touched JS file before handing changes to the user; content_merge.js is large enough that a stray brace is easy to introduce.
 
 ## Release / Versioning
 
-Version lives in `manifest.json` (`version`). Each release bumps it and adds a changelog entry to the top of the "更新日志" sections in **both** `README.md` and `README_EN.md` (keep them in sync). The release zip is built into `dist/` (gitignored) — no script automates this.
+Version lives in `manifest.json` (`version`). Each release bumps it and adds a changelog entry to the top of the "更新日志" sections in **both** `README.md` and `README_EN.md` (keep them in sync). The release zip is built into `dist/` (gitignored) — no script automates this (see Packaging below).
 
-**Release pushes go ONLY to `main` (GitHub + Gitee), never `master`** — despite active development happening on `master`, release commits/tags are pushed to `main`. Keep `dist/` containing only the newest version's zip when packaging.
+**Release pushes go ONLY to `main` (GitHub + Gitee), never `master`** — despite active development happening on `master`, release commits/tags are pushed to `main`. Keep `dist/` containing only the newest version's zip when packaging. When committing a version bump, use message format `v<version>: <summary>` (e.g. `v1.2.16: fix batch download collection title leaking into filenames`).
 
 **Sponsor links must never be dropped.** The afdian sponsor entry is intentional and permanent:
 - `.github/FUNDING.yml` — `custom: https://afdian.com/a/luokexiaoguo` (drives the "Sponsor this project" button on the GitHub repo sidebar)
 - README.md / README_EN.md — sponsor badge in the top badge row + "❤️ 赞助"/"❤️ Sponsor" section at the footer
 
-When updating READMEs (changelog, features, etc.), preserve these sponsor elements as-is. If a README rewrite or refactor removes them, restore them in the same commit. The FUNDING.yml file must always be present on `main`.
+When updating READMEs (changelog, features, etc.), preserve these sponsor elements as-is. If a README rewrite or refactor removes them, restore them in the same commit. The FUNDING.yml file must always be present on `main`. Also preserve the "💡 快速安装 / Quick Install" blockquote near the top of both READMEs (points users to the Edge/Chrome web stores — search "B站离线舱") — it is intentional store-funnel content.
+
+### Packaging (manual, no script)
+
+The release zip is built with PowerShell `Compress-Archive` into `dist/BiliDown-v<version>.zip` (~17.4 MB). Exclude these from the zip (they are NOT part of the extension): `_metadata`, `dist`, `afdian-worker`, `vercel-api`, `.git`, `.claude`, `content_merge.js.bak_v1.2.5`, `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md`. Copy the remaining root entries to a temp dir, compress, delete temp. Verify the zip listing afterwards — `.claude/settings.local.json` once leaked into a package. Delete the previous version's zip first (keep only newest).
 
 ## Architecture
 
@@ -39,6 +43,13 @@ popup.html/popup.js  →  content_bridge.js (ISOLATED world)  ↔  service_worke
 ### Key Constraint: MAIN World Cannot Access Chrome APIs
 
 `content_merge.js` runs in the page's MAIN world where `chrome.runtime` is `undefined`. ALL communication with the extension (FFmpeg loading, downloads) MUST go through CustomEvents to `content_bridge.js`, which runs in the ISOLATED world.
+
+### Key Constraint: File Pickers Need Transient User Activation
+
+`showSaveFilePicker` / `showDirectoryPicker` require transient user activation (a real DOM event, valid ~5s). Two hard rules learned the hard way:
+
+1. **Never call a picker right after `window.confirm()`** — the OK click on a NATIVE confirm dialog does NOT grant the page user activation (it's browser chrome, not a page event). Long videos hit this every time: the user reads the size warning, clicks OK after >5s, and the picker throws `SecurityError`. Always confirm via `overlay.ask()` (an in-page DOM button — its click IS an activation event) before opening a picker. Batch mode's `confirm()` calls are fine only because no picker follows them.
+2. **`FileSystemFileHandle` has NO `getParent()`** — that method belongs to the old FileSystemEntry API. There is no way to derive a file's folder from its handle; a second picker (with live activation) is the only way to get a sibling file handle. Don't re-attempt a getParent()-based "same folder" shortcut.
 
 ### Content Script Communication (CustomEvents on window)
 
@@ -89,7 +100,7 @@ Formula: `navigator.deviceMemory` based, with conservative clamping.
 ### Three-Layer Size Protection
 
 1. **HEAD probe**: Quick `Content-Length` / `Content-Range` request BEFORE download starts. If size > threshold, offers split immediately — no wasted download time. CDN may not support HEAD → returns 0, falls through to post-download check.
-2. **Early abort in fetchBin**: When downloading response body, reads `Content-Length` header at stream start. Single track already > threshold → throws `FILE_TOO_LARGE` → split dialog.
+2. **Early abort in fetchBin**: When downloading response body, reads `Content-Length` header at stream start. Single track already > threshold → throws `FILE_TOO_LARGE` → split dialog. Chunked responses (no Content-Length) also abort once `loaded` crosses the threshold — without this they OOM the tab because layers 1 and 3 are both blind to them.
 3. **Post-download safety net**: Always checks actual downloaded size against threshold. Catches cases where HEAD probe failed or returned inaccurate values.
 
 ### Split Download Streaming
@@ -97,10 +108,12 @@ Formula: `navigator.deviceMemory` based, with conservative clamping.
 Large files (>threshold) are split into separate video/audio downloads instead of merging in memory:
 
 - **Video**: Downloaded via `fetch()` with `credentials: 'include'` → on 403 falls back to `credentials: 'omit'`. Streamed to file handle in chunks (no `arrayBuffer()`, no OOM). Progress shown in overlay every 200ms via shared `_prog` state.
-- **Audio**: On split confirm, `acquireAudioHandle()` requests a second `showSaveFilePicker` inside the same user gesture → audio is written to the user-chosen file handle, **same folder as the video**. Falls back to blob URL only if the audio picker is cancelled / unsupported.
+- **Audio**: On split confirm (via `overlay.ask()`, see the activation constraint above), `acquireAudioHandle()` opens a second `showSaveFilePicker` → audio is written to the user-chosen file handle, **same folder as the video**. Falls back to blob URL only if the audio picker fails/cancelled (the overlay then explicitly notes the audio went to the browser default download dir).
 - **No longer uses `chrome.downloads.download` or `service_worker.js` for downloads** — all download requests go through `fetch()` which respects DNR rules for proper Referer/Origin headers.
 - Combined progress in overlay: `"视频: 1.2GB/8.4GB 15% | 音频: ✓"`
 - All split fetches pass `signal`; on abort the overlay is removed (no stuck download).
+- **Writable cleanup**: `createWritable()` puts the file entry on disk immediately. Any failure mid-stream MUST `w.abort()` (discards partial content) and continue to the next mirror URL before falling back to blob — otherwise the user's chosen folder keeps a 0-byte corpse while a complete copy lands in the default dir.
+- **Stall watchdog**: every `reader.read()` goes through `raceRead()` (60s idle timeout → cancels the body → caller's URL-retry loop moves to the next mirror). A hung CDN connection otherwise freezes the download forever with no error.
 
 ### Memory-Safety & Cleanup
 
@@ -126,6 +139,10 @@ The extension supports three URL patterns on bilibili.com:
 - `/video/BVxxxxxx` — regular videos (with multi-part `?p=N` support)
 - `/bangumi/play/epNNNNNN` / `/bangumi/play/ssNNNNNN` — anime/movies
 - `/cheese/play/epNNNNNN` — paid courses (uses `mplayer.getPlayurl()` for direct mp4 URL)
+
+### Resolve Failure Diagnostics (`extractDash` + `_lastResolveFailReason`)
+
+All playurl responses go through `extractDash(pj)`. When it returns null it sets `_lastResolveFailReason` so the generic "未找到视频流信息" can be replaced with a real diagnosis: `risk` (playurl code 412 — B站风控, tell the user to retry in 1-2 min) or `durl:<json>` (non-DASH direct-link video — downloaded as a plain mp4 via `fetchToBlob`, no merge needed). Batch mode does not surface these; it just skips the episode.
 
 ### Multi-Part Video Fix
 
@@ -158,9 +175,14 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 
 - `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. 4 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds); `useMT` picks between them. If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`. The ST core must be a real ST build — a fake ST (byte-identical to MT) silently breaks first-merge / post-restart downloads.
-- `content_merge.js` — Largest file (~1900 lines): all download/merge/stream logic, overlay UI, Bilibili API parsing, progress display, single-download flow + batch-download flow. Starts with a `__BILI_DRIVER_ACTIVE__` re-injection guard. Batch branch is gated by `window.__BILI_BATCH__`.
+- `content_merge.js` — Largest file (~2200 lines): all download/merge/stream logic, overlay UI (incl. `ask()` in-page confirm — required before any picker), Bilibili API parsing, progress display, single-download flow + batch-download flow. Starts with a `__BILI_DRIVER_ACTIVE__` re-injection guard. Batch branch is gated by `window.__BILI_BATCH__`.
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
 - `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version. Still serves FFmpeg file HEAD-verification + extension ID to the bridge.
 - `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`. The batch button sets `window.__BILI_BATCH__ = true` the same way.
-- `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); the actual source (`worker.js`, `wrangler.toml`, `api/activate.js`, `api/claim-api.js`, `api/status.js`, `vercel.json`) lives on the `activation-system` branch.
+- `.github/SPONSOR_GUIDE.md` — untracked local doc describing the afdian sponsor setup for AI agents; not committed per user decision. Do not include in commits.
+- `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); the actual source (`worker.js`, `wrangler.toml`, `api/activate.js`, `api/claim-api.js`, `api/status.js`, `vercel.json`) lives on the `activation-system` branch. Untracked — do not commit.
 - Root `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md` — unrelated poster-generation tooling, not part of the extension; ignore.
+
+## Store Distribution
+
+The extension is published on both Edge Add-ons (as "Bilibili Offline Pod - Anime & Movie Downloader", ~11k users) and Chrome Web Store (as "B站离线舱-番剧电影下载器", ~1k users). Both stores get the same `dist/` zip. Store updates are submitted manually by the user via the partner dashboards. Chrome listing description is Chinese; English copy has been drafted for a future localized listing but not yet submitted. Edge review is slow (weeks); Chrome is faster.

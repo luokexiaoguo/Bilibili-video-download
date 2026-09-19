@@ -36,11 +36,23 @@
         merge: "正在合并...",
         saveFile: "保存文件中...",
         canceled: "已取消",
-        bigFile: "文件过大",
-        bigFileDetail: "文件大小超出当前设备推荐合并能力",
-        bigFileConfirm: "检测到文件过大(或内存不足)，无法合并。\n\n是否分别下载视频和音频轨道？",
+        stallDetect: "下载停滞，正在重试...",
+        selectSaveRetry: "选择保存位置",
+        securityRetryDetail: "浏览器要求重新选择保存位置（点击操作超时）",
+        riskControl: "B站风控限流，请稍等 1-2 分钟再试",
+        durlMode: "该视频为直链格式，直接下载视频文件（无独立音频轨）",
+        audioFallbackDefaultDir: "（音频未能选择保存位置，已保存到浏览器默认下载目录）",
+        bigFile: "大文件分轨下载",
+        bigFileDetail: "文件较大，将分别下载视频和音频",
+        bigFileConfirm: "视频较大（约 {size}），超出浏览器内存合并上限。\n\n是否分别下载视频、音频两个文件？（无需合并，下载后可直接用播放器播放或自行合并）",
         errTitle: "出错啦",
+        yes: "确定",
+        no: "取消",
+        mergeFailDetail: "下载失败，是否尝试分别下载？",
         mergeFailConfirm: "合并失败: {msg}\n\n是否尝试分别下载已获取的视频/音频轨道？\n(如果不保存，已下载的数据将丢失)",
+        oomDetail: "内存不足，无法合并。请分别下载视频和音频。",
+        oomShort: "内存不足",
+        mergeErrShort: "合并过程出错",
         video: "视频",
         audio: "音频",
         noStreamSave: "当前浏览器不支持流式保存",
@@ -91,11 +103,23 @@
         merge: "Merging...",
         saveFile: "Saving file...",
         canceled: "Canceled",
-        bigFile: "File Too Large",
-        bigFileDetail: "File size exceeds recommended merge capacity for this device",
-        bigFileConfirm: "File too large (or OOM). Cannot merge.\n\nDownload video/audio separately?",
+        stallDetect: "Download stalled, retrying...",
+        selectSaveRetry: "Choose Save Location",
+        securityRetryDetail: "Browser needs you to re-pick a save location (gesture expired)",
+        riskControl: "Rate-limited by Bilibili. Please retry in 1-2 minutes.",
+        durlMode: "Direct-link video format — downloading the video file directly (no separate audio track)",
+        audioFallbackDefaultDir: "(Audio save location wasn't selected — saved to the browser default download dir)",
+        bigFile: "Large File Split",
+        bigFileDetail: "Large file — video and audio will be downloaded separately",
+        bigFileConfirm: "This video is large (about {size}) and exceeds the in-browser merge limit.\n\nDownload video and audio as two separate files? (No merging needed — play directly or merge yourself afterwards)",
         errTitle: "Error",
+        yes: "OK",
+        no: "Cancel",
+        mergeFailDetail: "Download failed. Try downloading separately?",
         mergeFailConfirm: "Merge failed: {msg}\n\nDownload fetched video/audio tracks separately?\n(Data will be lost if not saved)",
+        oomDetail: "Out of memory — cannot merge. Please download video and audio separately.",
+        oomShort: "Out of memory",
+        mergeErrShort: "Merge error",
         video: "Video",
         audio: "Audio",
         noStreamSave: "Browser does not support stream save",
@@ -210,6 +234,32 @@
           cancelBtn.style.cssText = "background:transparent;border:none;color:#fff;cursor:pointer;font-size:12px;padding:0;text-decoration:none;";
           cancelBtn.onclick = () => my.remove();
         },
+        // In-page confirmation. MUST be used instead of window.confirm() whenever a
+        // file picker follows: a click on a real DOM button grants transient user
+        // activation, whereas the OK click of a native confirm() dialog does NOT —
+        // so any showSaveFilePicker() after confirm() fails with SecurityError.
+        ask: (msg, okTxt, noTxt) => new Promise(resolve => {
+          const box = document.createElement("div");
+          box.style.cssText = "margin-top:10px;padding:8px;background:rgba(255,255,255,0.08);border-radius:6px;";
+          const p = document.createElement("div");
+          p.style.cssText = "font-size:12px;white-space:pre-wrap;margin-bottom:8px;line-height:1.5;";
+          p.textContent = msg;
+          box.appendChild(p);
+          const row = document.createElement("div");
+          row.style.cssText = "display:flex;justify-content:flex-end;gap:10px;";
+          const okB = document.createElement("button");
+          okB.textContent = okTxt;
+          okB.style.cssText = "background:#00aeec;border:none;color:#fff;cursor:pointer;font-size:12px;padding:4px 14px;border-radius:4px;";
+          const noB = document.createElement("button");
+          noB.textContent = noTxt;
+          noB.style.cssText = "background:rgba(255,255,255,0.15);border:none;color:#fff;cursor:pointer;font-size:12px;padding:4px 14px;border-radius:4px;";
+          const finish = v => { try { box.remove(); } catch (_) {} resolve(v); };
+          okB.onclick = () => finish(true);
+          noB.onclick = () => finish(false);
+          row.appendChild(okB); row.appendChild(noB);
+          box.appendChild(row);
+          el.insertBefore(box, btnArea);
+        }),
         resetCancel: () => {
           cancelBtn.textContent = T.cancel;
           cancelBtn.style.cssText = "background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
@@ -245,6 +295,28 @@
       const u = ["B","KB","MB","GB"]; let i = 0, v = n;
       while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
       return v.toFixed(1) + " " + u[i];
+    };
+
+    // ============================================================
+    // 2b. Stalled-read watchdog
+    // CDN connections occasionally hang: no data, no error, no end —
+    // reader.read() then pends forever and the download "freezes".
+    // raceRead wraps each read with an idle timeout; on stall it cancels
+    // the body so the caller's URL-retry loop can try the next mirror.
+    // ============================================================
+    const STALL_TIMEOUT_MS = 60000; // no bytes for 60s = stalled
+    const raceRead = (reader, timeoutMs = STALL_TIMEOUT_MS) => {
+      let timer = null;
+      return new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error("READ_STALLED"));
+          try { reader.cancel().catch(() => {}); } catch (_) {}
+        }, timeoutMs);
+        reader.read().then(
+          v => { clearTimeout(timer); resolve(v); },
+          e => { clearTimeout(timer); reject(e); }
+        );
+      });
     };
 
     // ============================================================
@@ -510,7 +582,8 @@
           if (cid) u += `&cid=${cid}`;
           const pr = await fetchWithTimeout(u, { credentials: "include" });
           const pj = await pr.json();
-          if (pj?.result?.dash || pj?.data?.dash) return pj.result.dash || pj.data.dash;
+          const d = extractDash(pj);
+          if (d) return d;
         } catch (_) {}
       }
 
@@ -522,7 +595,8 @@
             const u = `https://api.bilibili.com/p/player/playurl?cid=${cid}&bvid=${cbvid}&qn=120&fnval=4048&fourk=1`;
             const pr = await fetchWithTimeout(u, { credentials: "include" });
             const pj = await pr.json();
-            if (pj?.data?.dash) return pj.data.dash;
+            const d = extractDash(pj);
+            if (d) return d;
           } catch (_) {}
         }
       }
@@ -534,7 +608,8 @@
           try {
             const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${useBvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
             const pj = await pr.json();
-            if (pj?.data?.dash) return pj.data.dash;
+            const d = extractDash(pj);
+            if (d) return d;
           } catch (_) {}
         }
       }
@@ -664,6 +739,26 @@
       return null;
     };
 
+    // 记录解析失败的具体原因,让"未找到视频流信息"从黑盒变成可诊断的提示
+    let _lastResolveFailReason = null;
+    // 从 playurl 响应里提取 dash;同时识别 412 风控 / durl(非 DASH)等特殊情况
+    const extractDash = (pj) => {
+      _lastResolveFailReason = null;
+      if (!pj) return null;
+      if (pj.code === 412 || Number(pj.code) === 412 || pj?.data?.code === 412 || pj?.result?.code === 412) {
+        _lastResolveFailReason = 'risk';
+        return null;
+      }
+      const d = pj?.data?.dash || pj?.result?.dash;
+      if (d) return d;
+      // durl(FLV/MP4 直链,非 DASH):互动视频、部分老视频。标记为 durl 模式
+      if (pj?.data?.durl || pj?.result?.durl) {
+        _lastResolveFailReason = 'durl:' + JSON.stringify(pj?.data?.durl || pj?.result?.durl);
+        return null;
+      }
+      return null;
+    };
+
     async function resolveBilibili(specificCid, specificEpId) {
       // 如果用户明确指定了 cid（分P选择器），优先使用，跳过自动检测
       const currentCid = specificCid ? null : getCurrentVideoCid();
@@ -676,13 +771,14 @@
           try {
             const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${currentCid.cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
             const pj = await pr.json();
-            if (pj?.data?.dash) {
+            const d = extractDash(pj);
+            if (d) {
               console.log('[BiliDown] Using real-time cid:', currentCid.cid);
-              return pj.data.dash;
+              return d;
             }
           } catch (_) {}
         }
-        
+
         // 番剧使用 ep_id 方式（优先使用选择器指定的 epId，否则用当前 URL 的）
         const ep = location.pathname.match(/\/bangumi\/play\/ep(\d+)/i);
         const epId = specificEpId || (ep ? ep[1] : null);
@@ -691,9 +787,10 @@
             const u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1&cid=${currentCid.cid}&ep_id=${epId}`;
             const pr = await fetchWithTimeout(u, { credentials: "include" });
             const pj = await pr.json();
-            if (pj?.result?.dash || pj?.data?.dash) {
+            const d = extractDash(pj);
+            if (d) {
               console.log('[BiliDown] Using real-time cid for bangumi:', currentCid.cid, 'epId:', epId);
-              return pj.result.dash || pj.data.dash;
+              return d;
             }
           } catch (_) {}
         }
@@ -735,13 +832,13 @@
         try {
           const pr = await fetchWithTimeout(`https://api.bilibili.com/x/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`, { credentials: "include" });
           const pj = await pr.json();
-          if (pj?.data?.dash) dash = pj.data.dash;
+          dash = extractDash(pj);
         } catch (_) {}
       }
       if (!dash && (epId || (bvid && cid))) {
         let u = `https://api.bilibili.com/pgc/player/web/playurl?qn=120&fnval=4048&fourk=1`;
         if (epId) u += `&ep_id=${epId}`; else u += `&cid=${cid}&bvid=${bvid}`;
-        try { const pr = await fetchWithTimeout(u, { credentials: "include" }); const pj = await pr.json(); if (pj?.result?.dash || pj?.data?.dash) dash = pj.result.dash || pj.data.dash; } catch (_) {}
+        try { const pr = await fetchWithTimeout(u, { credentials: "include" }); const pj = await pr.json(); dash = extractDash(pj); } catch (_) {}
       }
       // cheese 课程专用 API
       if (!dash && info?.isCheese && bvid && cid) {
@@ -749,7 +846,7 @@
           const u = `https://api.bilibili.com/p/player/playurl?cid=${cid}&bvid=${bvid}&qn=120&fnval=4048&fourk=1`;
           const pr = await fetchWithTimeout(u, { credentials: "include" });
           const pj = await pr.json();
-          if (pj?.data?.dash) dash = pj.data.dash;
+          dash = extractDash(pj);
         } catch (_) {}
       }
       return dash;
@@ -854,7 +951,7 @@
 
       while (true) {
         if (signal.aborted) { try { await writable.abort(); } catch (_) {} throw new Error("Aborted"); }
-        const { done, value } = await reader.read();
+        const { done, value } = await raceRead(reader);
         if (done) break;
         await writable.write(value);
         loaded += value.length;
@@ -874,7 +971,7 @@
     // ============================================================
     // 7. Streaming Merge (FFmpeg-free, sequential streams)
     // ============================================================
-    const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls }) => {
+    const streamMerge = async ({ vUrl, aUrl, filename, vAllUrls, aAllUrls, existingHandle = null }) => {
       if (!window.showSaveFilePicker) {
         // Fallback: blob URL download for both (no file handle available)
         overlay.setStep(T.browserDl); overlay.setProgress(90);
@@ -884,15 +981,42 @@
 
       // IMPORTANT: Request file handle EARLY while user gesture is still active
       // showSaveFilePicker must be called in response to a user gesture
-      let fileHandle;
-      try {
-        fileHandle = await window.showSaveFilePicker({
-          suggestedName: `${T.video}-${filename}.mp4`,
-          types: [{ description: 'MP4', accept: {'video/mp4': ['.mp4']} }]
-        });
-      } catch (e) {
-        if (e.name === 'AbortError') { overlay.remove(); return; }
-        throw e;
+      let fileHandle = existingHandle;
+      if (!fileHandle) {
+        try {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: `${T.video}-${filename}.mp4`,
+            types: [{ description: 'MP4', accept: {'video/mp4': ['.mp4']} }]
+          });
+        } catch (e) {
+          if (e.name === 'AbortError') { overlay.remove(); return; }
+          // SecurityError: user activation (the popup click) expired while we were
+          // resolving video info (slow network). Instead of silently falling back to
+          // blob download in the default dir, surface a retry button — clicking it
+          // grants a FRESH user gesture so the save picker can open again.
+          if (e.name === 'SecurityError' || /user gesture|activation/i.test(String(e?.message || ''))) {
+            overlay.setStep(T.errTitle);
+            overlay.setDetail(T.securityRetryDetail);
+            overlay.setProgress(0);
+            overlay.addBtn(T.selectSaveRetry, async () => {
+              try {
+                const fh = await window.showSaveFilePicker({
+                  suggestedName: `${T.video}-${filename}.mp4`,
+                  types: [{ description: 'MP4', accept: {'video/mp4': ['.mp4']} }]
+                });
+                overlay.resetCancel();
+                await streamMerge({ vUrl, aUrl, filename, vAllUrls, aAllUrls, existingHandle: fh });
+              } catch (e2) {
+                if (e2?.name === 'AbortError') { overlay.remove(); return; }
+                console.warn('[BiliDown] Retry picker failed, blob fallback:', e2);
+                overlay.setStep(T.browserDl); overlay.setProgress(90);
+                doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, null);
+              }
+            });
+            return;
+          }
+          throw e;
+        }
       }
 
       overlay.setStep(T.coreLoad);
@@ -955,16 +1079,10 @@
       // Pre-download decision: if we can estimate and it's too large, split NOW (no wasted download)
       if (estTotalSize > 0 && estTotalSize > MAX_SIZE_FOR_MERGE) {
         console.log("[SizeCheck] Estimated total exceeds threshold → offering split download immediately");
-        overlay.setStep(T.bigFile);
-        overlay.setDetail(T.bigFileDetail);
-        if (confirm(T.bigFileConfirm)) {
-          (async () => {
-            const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
-            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
-          })();
-        } else {
-          overlay.remove();
-        }
+        await offerSplitDownload({
+          size: estTotalSize, vUrls: vAllUrls, aUrls: aAllUrls,
+          vName: `${T.video}-${filename}.mp4`, aName: `${T.audio}-${filename}.m4a`, fh: fileHandle
+        });
         return;
       }
 
@@ -1093,9 +1211,16 @@
             const start = performance.now(); let lastUpd = 0;
             while (true) {
               if (signal.aborted) throw new Error("Aborted");
-              const { done, value } = await reader.read();
+              const { done, value } = await raceRead(reader);
               if (done) break;
               chunks.push(value); loaded += value.length;
+              // Memory guard: chunked transfer (no Content-Length) can silently
+              // exceed the merge threshold while accumulating in RAM → OOM.
+              // Abort as soon as we cross it and let the caller split instead.
+              if (!total && loaded > MAX_SIZE_FOR_MERGE) {
+                console.warn(`[FetchBin] ${label} loaded ${Math.round(loaded/1024/1024)}MB without Content-Length, exceeds threshold → aborting`);
+                throw new Error(`FILE_TOO_LARGE:${label}:${loaded}`);
+              }
               const now = performance.now();
               if (now - lastUpd > 200) {
                 lastUpd = now;
@@ -1133,28 +1258,21 @@
         // FILE_TOO_LARGE: Content-Length header already exceeds threshold → split immediately
         if (String(e?.message || '').startsWith('FILE_TOO_LARGE:')) {
           console.warn("[SizeCheck] fetchBin aborted early:", e.message);
-          overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
-          if (confirm(T.bigFileConfirm)) {
-            (async () => {
-              const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
-              doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
-            })();
-          } else {
-            overlay.remove();
-          }
+          const abortSize = Number(String(e.message).split(':')[2]) || 0;
+          await offerSplitDownload({
+            size: abortSize, vUrls: vAllUrls, aUrls: aAllUrls,
+            vName: `${T.video}-${filename}.mp4`, aName: `${T.audio}-${filename}.m4a`, fh: fileHandle
+          });
           return;
         }
         console.error("[BiliDown] Fetch failed, falling back to separate download:", e);
         overlay.setStep(T.errTitle);
-        overlay.setDetail("下载失败，是否尝试分别下载？");
-        if (confirm(T.mergeFailConfirm.replace("{msg}", e?.message || "下载失败"))) {
-          (async () => {
-            const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
-            doSplitDownload(null, null, vAllUrls, aAllUrls, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
-          })();
-        } else {
-          overlay.remove();
-        }
+        overlay.setDetail(T.mergeFailDetail);
+        await offerSplitDownload({
+          size: 0, vUrls: vAllUrls, aUrls: aAllUrls,
+          vName: `${T.video}-${filename}.mp4`, aName: `${T.audio}-${filename}.m4a`, fh: fileHandle,
+          msg: T.mergeFailConfirm.replace("{msg}", e?.message || T.dlFail)
+        });
         return;
       }
 
@@ -1163,15 +1281,10 @@
       const actualTotalSize = vBin.byteLength + aBin.byteLength;
       if (actualTotalSize > MAX_SIZE_FOR_MERGE) {
         console.log("[SizeCheck] Actual size", Math.round(actualTotalSize/1024/1024), "MB exceeds threshold", Math.round(MAX_SIZE_FOR_MERGE/1024/1024), "MB → split");
-        overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail);
-        if (confirm(T.bigFileConfirm)) {
-          (async () => {
-            const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
-            doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
-          })();
-        } else {
-          overlay.remove();
-        }
+        await offerSplitDownload({
+          size: actualTotalSize, vData: vBin, aData: aBin,
+          vName: `${T.video}-${filename}.mp4`, aName: `${T.audio}-${filename}.m4a`, fh: fileHandle
+        });
         return;
       }
 
@@ -1220,14 +1333,30 @@
       // If merge failed, offer separate download via blob URL (data already in memory)
       overlay.setStep(T.errTitle);
       const isOOM = /Array buffer allocation|out of memory|Cannot allocate/i.test(String(ffmpegError?.message || ''));
-      overlay.setDetail(isOOM ? "内存不足，无法合并。请分别下载视频和音频。" : "合并失败，是否分别下载视频和音频？");
-      if (confirm(T.mergeFailConfirm.replace("{msg}", isOOM ? "内存不足" : "合并过程出错"))) {
-        (async () => {
-          const afh = await acquireAudioHandle(`${T.audio}-${filename}.m4a`);
-          doSplitDownload(vBin, aBin, null, null, `${T.video}-${filename}.mp4`, `${T.audio}-${filename}.m4a`, fileHandle, afh);
-        })();
-      } else {
-        overlay.remove();
+      overlay.setDetail(isOOM ? T.oomDetail : T.mergeFailDetail);
+      await offerSplitDownload({
+        size: 0, vData: vBin, aData: aBin,
+        vName: `${T.video}-${filename}.mp4`, aName: `${T.audio}-${filename}.m4a`, fh: fileHandle,
+        msg: T.mergeFailConfirm.replace("{msg}", isOOM ? T.oomShort : T.mergeErrShort)
+      });
+    };
+
+    // Ask the user (in-page button, so the click grants user activation) and, on
+    // confirm, grab the audio handle and start the split download. Must be used
+    // instead of window.confirm() — see acquireAudioHandle comment above.
+    const offerSplitDownload = async ({ size, vData, aData, vUrls, aUrls, vName, aName, fh, msg = null }) => {
+      // Only override the overlay's step line for the "file too large" case;
+      // failure paths (merge error) set their own title/detail beforehand.
+      if (!msg) { overlay.setStep(T.bigFile); overlay.setDetail(T.bigFileDetail); }
+      const text = msg || T.bigFileConfirm.replace("{size}", fmtBytes(size));
+      const ok = await overlay.ask(text, T.yes, T.no);
+      if (!ok) { overlay.remove(); return; }
+      try {
+        const afh = await acquireAudioHandle(aName);
+        doSplitDownload(vData, aData, vUrls, aUrls, vName, aName, fh, afh);
+      } catch (e) {
+        console.error('[Split] Split download crashed:', e);
+        overlay.setStep(T.errTitle); overlay.setDetail(String(e?.message || e));
       }
     };
 
@@ -1255,14 +1384,17 @@
           if (!res.ok) continue;
           const total = Number(res.headers.get('content-length')) || 0;
           const reader = res.body.getReader();
-          const chunks = []; let loaded = 0; const start = performance.now();
+          const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
           while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await raceRead(reader);
             if (done) break;
             chunks.push(value); loaded += value.length;
-            const elapsed = (performance.now() - start) / 1000;
-            const pct = total ? `${Math.round(loaded/total*100)}%` : '';
-            overlay.setDetail(`${name}: ${fmtBytes(loaded)}/${fmtBytes(total)} ${pct}`);
+            const now = performance.now();
+            if (now - lastUpd > 200) {
+              lastUpd = now;
+              const pct = total ? `${Math.round(loaded/total*100)}%` : '';
+              overlay.setDetail(`${name}: ${fmtBytes(loaded)}/${fmtBytes(total)} ${pct}`);
+            }
           }
           const buf = new Uint8Array(loaded);
           let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
@@ -1290,7 +1422,7 @@
       let loaded = 0;
       const chunks = [];
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await raceRead(reader);
         if (done) break;
         loaded += value.length;
         chunks.push(value);
@@ -1319,9 +1451,17 @@
       _updateDetail();
     };
 
-    // Acquire an audio save handle in the same user gesture as the split confirm,
-    // so audio lands beside the video (user-chosen folder) instead of the default dir.
-    // Returns null if unsupported / user cancels — caller falls back to blob.
+    // Acquire an audio save handle so audio lands in the SAME FOLDER as the video.
+    //
+    // NOTE: there is no way to derive the video's folder from its file handle —
+    // FileSystemFileHandle has NO getParent() (that method belongs to the old
+    // FileSystemEntry API). So this must open a real picker, which requires
+    // transient user activation. Callers MUST therefore ask for confirmation via
+    // overlay.ask() (a real DOM button click grants activation) and NOT via
+    // window.confirm() (its OK click does NOT), or the picker throws SecurityError.
+    //
+    // Returns null on any failure — caller falls back to blob download in the
+    // browser default dir. NEVER let this kill the download.
     const acquireAudioHandle = async (aName) => {
       if (!window.showSaveFilePicker) return null;
       try {
@@ -1331,7 +1471,10 @@
         });
       } catch (e) {
         if (e?.name === 'AbortError') return null; // user cancelled audio dialog
-        throw e;
+        // SecurityError (expired user activation) or any other failure: fall back to
+        // blob download rather than rethrowing into an unhandled rejection.
+        console.warn('[Split] Audio handle acquisition failed, falling back to blob:', e?.name, e?.message);
+        return null;
       }
     };
 
@@ -1341,8 +1484,8 @@
     const doSplitDownload = (vData, aData, vUrls, aUrls, vName, aName, fh, afh = null) => {
       overlay.setStep(T.browserDl); overlay.setProgress(90);
       _prog.v = ''; _prog.a = '';
-      let _done = 0;
-      const _checkDone = () => { _done++; if (_done >= 2) { overlay.setProgress(100); overlay.done(); } };
+      let _done = 0, _failed = false;
+      const _checkDone = (failed) => { if (failed) _failed = true; _done++; if (_done >= 2) { overlay.setProgress(100); if (_failed) { overlay.setStep(T.dlFailTitle); } overlay.done(); } };
       if (!fh) {
         console.warn('[Split] No fileHandle, using blob fallback');
         // Download video and audio via blob URLs (no file handle available)
@@ -1390,18 +1533,26 @@
               return;
             } catch (e) {
               if (e?.message === 'Aborted' || signal.aborted) { overlay.remove(); return; }
+              if (e?.message === 'READ_STALLED') { _prog.v = `${T.video}: ${T.stallDetect}`; _updateDetail(); }
               console.error('[Split] Video URL FAILED:', e.message || e);
             }
           }
           _prog.v = `${T.video}: 所有 URL 失败`;
-          _updateDetail(); _checkDone();
+          _updateDetail(); _checkDone(true);
         })();
       }
       // Audio — written to afh (chosen folder) when available, else blob default dir
       setTimeout(() => {
         const audioDone = () => { _prog.a = `${T.audio}: ✓`; _updateDetail(); _checkDone(); };
+        // When the video went to a user-chosen folder but audio had no handle
+        // (cancelled / gesture expired / write failed), say so explicitly —
+        // otherwise the user finds the audio silently in the default dir.
+        const blobAudioDone = () => {
+          _prog.a = `${T.audio}: ✓${fh ? ` ${T.audioFallbackDefaultDir}` : ''}`;
+          _updateDetail(); _checkDone();
+        };
         const audioBlobFallback = () => {
-          if (aData) { _prog.a = `${T.audio}: 保存中...`; _updateDetail(); saveBlob(aData, aName, audioDone); }
+          if (aData) { _prog.a = `${T.audio}: 保存中...`; _updateDetail(); saveBlob(aData, aName, blobAudioDone); }
           else {
             if (!Array.isArray(aUrls)) aUrls = [aUrls];
             _prog.a = `${T.audio}: 下载中...`;
@@ -1413,34 +1564,67 @@
                   if (!res.ok) continue;
                   const total = Number(res.headers.get('content-length')) || 0;
                   const reader = res.body.getReader();
-                  const chunks = []; let loaded = 0; const start = performance.now();
+                  const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
                   while (true) {
                     if (signal.aborted) throw new Error("Aborted");
-                    const { done, value } = await reader.read();
+                    const { done, value } = await raceRead(reader);
                     if (done) break;
                     chunks.push(value); loaded += value.length;
-                    const elapsed = (performance.now() - start) / 1000;
-                    const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
-                    _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
-                    _updateDetail();
+                    const now = performance.now();
+                    if (now - lastUpd > 200) {
+                      lastUpd = now;
+                      const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
+                      _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
+                      _updateDetail();
+                    }
                   }
                   const buf = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0));
                   let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
                   _prog.a = `${T.audio}: 触发下载...`;
                   _updateDetail();
-                  saveBlob(buf, aName, audioDone);
+                  saveBlob(buf, aName, blobAudioDone);
                   return;
                 } catch (e) {
                   if (e?.message === 'Aborted' || signal.aborted) { overlay.remove(); return; }
                   console.warn('[Audio] URL failed:', e);
                 }
               }
-              audioDone();
+              blobAudioDone();
             })();
           }
         };
         // If we have an audio handle, write to it; else fall back to blob.
         if (afh) {
+          // Stream one audio response into the audio file handle with progress.
+          // Returns when done; throws on error so the caller can try the next URL.
+          // On error the writable is aborted, which discards partial content
+          // (the on-disk file reverts) instead of leaving a 0-byte corpse.
+          const streamAudioToHandle = async (res) => {
+            const total = Number(res.headers.get('content-length')) || 0;
+            const w = await afh.createWritable();
+            const reader = res.body.getReader();
+            let loaded = 0; const start = performance.now(); let lastUpd = 0;
+            try {
+              while (true) {
+                if (signal.aborted) throw new Error("Aborted");
+                const { done, value } = await raceRead(reader);
+                if (done) break;
+                await w.write(value); loaded += value.length;
+                const now = performance.now();
+                if (now - lastUpd > 200) {
+                  lastUpd = now;
+                  const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
+                  _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
+                  _updateDetail();
+                }
+              }
+              await w.close();
+            } catch (err) {
+              try { await w.abort(); } catch (_) {} // discard partial file
+              throw err;
+            }
+            audioDone();
+          };
           if (aData) {
             _prog.a = `${T.audio}: 写入中... ${fmtBytes(aData.byteLength)}`; _updateDetail();
             (async () => {
@@ -1458,33 +1642,25 @@
               for (const url of aUrls) {
                 try {
                   if (signal.aborted) throw new Error("Aborted");
+                  // Fetch the response fully before creating the writable — a failed
+                  // fetch must not leave a 0-byte file in the user's chosen folder.
                   const res = await fetch(url, { credentials: 'include', referrer: location.href, referrerPolicy: 'strict-origin-when-cross-origin', signal });
-                  if (!res.ok) continue;
-                  const total = Number(res.headers.get('content-length')) || 0;
-                  const w = await afh.createWritable();
-                  const reader = res.body.getReader();
-                  let loaded = 0; const start = performance.now();
-                  while (true) {
-                    if (signal.aborted) { try { await w.abort(); } catch (_) {} throw new Error("Aborted"); }
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    await w.write(value); loaded += value.length;
-                    const elapsed = (performance.now() - start) / 1000;
-                    const pct = total ? ` ${Math.round(loaded/total*100)}%` : '';
-                    _prog.a = `${T.audio}: ${fmtBytes(loaded)}/${fmtBytes(total)}${pct}`;
-                    _updateDetail();
+                  if (!res.ok || !res.body) {
+                    // Retry without credentials (403 on some CDN nodes)
+                    const res2 = await fetch(url, { credentials: 'omit', referrer: 'https://www.bilibili.com/', referrerPolicy: 'strict-origin-when-cross-origin', signal });
+                    if (!res2.ok || !res2.body) continue;
+                    return await streamAudioToHandle(res2);
                   }
-                  await w.close();
-                  audioDone();
-                  return;
+                  return await streamAudioToHandle(res);
                 } catch (e) {
                   if (e?.message === 'Aborted' || signal.aborted) { overlay.remove(); return; }
                   console.warn('[Audio] URL failed:', e);
-                  audioBlobFallback();
-                  return;
+                  // Try the NEXT mirror URL before giving up on the handle path
+                  continue;
                 }
               }
-              audioDone();
+              // All mirror URLs failed for the handle path → blob fallback (default dir)
+              audioBlobFallback();
             })();
           }
         } else {
@@ -1591,9 +1767,13 @@
           const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
           while (true) {
             if (signal.aborted) throw new Error("Aborted");
-            const { done, value } = await reader.read();
+            const { done, value } = await raceRead(reader);
             if (done) break;
             chunks.push(value); loaded += value.length;
+            // Memory guard for chunked transfer (no Content-Length) — same as fetchBin
+            if (!total && loaded > BATCH_MERGE_THRESHOLD) {
+              throw new Error(`FILE_TOO_LARGE:${label}:${loaded}`);
+            }
             const now = performance.now();
             if (now - lastUpd > 200) {
               lastUpd = now;
@@ -1652,7 +1832,7 @@
           const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
           while (true) {
             if (signal.aborted) { try { await writable?.abort(); } catch (_) {} throw new Error("Aborted"); }
-            const { done, value } = await reader.read();
+            const { done, value } = await raceRead(reader);
             if (done) break;
             if (writable) await writable.write(value);
             else chunks.push(value);
@@ -1919,7 +2099,29 @@
     } catch(e) {
       overlay.setStep(T.parseErr); overlay.setDetail(e.message); overlay.done(); return;
     }
-    if (!dash) { overlay.setStep(T.noInfo); overlay.setDetail(T.noInfoDetail); overlay.done(); setTimeout(() => overlay.remove(), 6000); return; }
+    if (!dash) {
+      // 把黑盒的"未找到视频流信息"变成可诊断的提示:风控限流 / durl 非DASH视频
+      if (_lastResolveFailReason === 'risk') {
+        overlay.setStep(T.parseErr); overlay.setDetail(T.riskControl); overlay.done();
+        setTimeout(() => overlay.remove(), 8000); return;
+      }
+      if (typeof _lastResolveFailReason === 'string' && _lastResolveFailReason.startsWith('durl:')) {
+        // durl(FLV/MP4 直链)视频:直接下载 mp4,无需合并
+        try {
+          const durls = JSON.parse(_lastResolveFailReason.slice(5));
+          const dUrl = durls?.[0]?.url || durls?.[0]?.baseUrl;
+          if (dUrl) {
+            const dName = safeName((document.title || 'bilibili_video').replace('_bilibili', ''));
+            overlay.setStep(T.browserDl); overlay.setProgress(90);
+            overlay.setDetail(T.durlMode);
+            fetchToBlob([dUrl, ...(durls[0]?.backupUrl || [])], `${dName}.mp4`);
+            overlay.done();
+            return;
+          }
+        } catch (_) {}
+      }
+      overlay.setStep(T.noInfo); overlay.setDetail(T.noInfoDetail); overlay.done(); setTimeout(() => overlay.remove(), 6000); return;
+    }
 
     const vArr = dash.video, aArr = dash.audio;
     console.log('[BiliDown] preferHDR:', preferHDR, '| Total video tracks:', vArr?.length);
