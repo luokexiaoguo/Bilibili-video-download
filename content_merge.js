@@ -70,6 +70,7 @@
         batchNoDirHint: "将使用浏览器默认下载目录逐个保存",
         batchDone: "批量完成",
         batchEpFail: "集失败",
+        batchRetrying: "下载失败，正在重新获取地址后重试...",
         batchTooLarge: "文件较大，分轨保存",
         batchSplit: "改为分轨保存",
         batchNoCollection: "当前页面不是合集或多P，无法批量下载",
@@ -137,6 +138,7 @@
         batchNoDirHint: "Will save each to browser default download dir",
         batchDone: "Batch Done",
         batchEpFail: "episodes failed",
+        batchRetrying: "Failed, fetching a fresh URL and retrying...",
         batchTooLarge: "large file, saving tracks separately",
         batchSplit: "splitting instead",
         batchNoCollection: "Current page is not a collection/multi-part, cannot batch download",
@@ -334,13 +336,24 @@
         if (!pages.length && st.mediaInfo?.episodes?.length) {
           pages = st.mediaInfo.episodes.map((ep) => ({ part: ep.title || ep.long_title || '', cid: ep.cid, epId: ep.id }));
         }
-        // UGC合集（用户创建的合集/系列）：videoData.ugc_season.episodes
-        if (!pages.length && st.videoData?.ugc_season?.episodes?.length) {
-          pages = st.videoData.ugc_season.episodes.map((ep) => ({ part: ep.title || '', cid: ep.cid }));
+        // UGC合集（用户创建的合集）：每集是独立 BV，必须保留 ep.bvid，
+        // 否则批量下载会退回用页面入口 BV 请求 playurl → bvid/cid 不匹配 → 412。
+        // 合集可能拆成多个 section，优先展开 sections[].episodes，否则退回 episodes。
+        if (!pages.length) {
+          const ugs = st.videoData?.ugc_season;
+          const ugcEps = [];
+          if (ugs?.sections?.length) {
+            for (const sec of ugs.sections) for (const ep of (sec.episodes || [])) ugcEps.push(ep);
+          } else if (ugs?.episodes?.length) {
+            ugcEps.push(...ugs.episodes);
+          }
+          if (ugcEps.length) {
+            pages = ugcEps.map((ep) => ({ part: ep.title || '', cid: ep.cid, bvid: ep.bvid }));
+          }
         }
-        // 系列视频：videoData.series.list
+        // 系列视频：videoData.series.list（同样是独立 BV）
         if (!pages.length && st.videoData?.series?.list?.length) {
-          pages = st.videoData.series.list.map((ep) => ({ part: ep.title || '', cid: ep.cid }));
+          pages = st.videoData.series.list.map((ep) => ({ part: ep.title || '', cid: ep.cid, bvid: ep.bvid }));
         }
         if (pages.length > 1) {
           const p = parseInt(new URLSearchParams(location.search).get('p') || '1', 10) - 1;
@@ -459,8 +472,10 @@
             || st.mediaInfo?.title
             || null;
         } catch (_) {}
+        // bvid:UGC合集/系列每集是独立 BV(getMultiPartInfo 已带上);
+        // 普通多P/番剧没有 per-page bvid,交给 resolveEpisodeDash 用页面 BV。
         return mpi.pages.map((p, i) => ({
-          cid: String(p.cid || ''), bvid: undefined, epId: p.epId, title: p.part || p.title || `P${i+1}`
+          cid: String(p.cid || ''), bvid: p.bvid || undefined, epId: p.epId, title: p.part || p.title || `P${i+1}`
         }));
       }
       // UGC 合集/series:页面 __INITIAL_STATE__ 可能没展开完整列表,
@@ -1808,10 +1823,22 @@
       return false;
     };
 
+    // 删除目录里的文件(尽力而为,失败不抛)。用于清理失败镜像留下的残骸。
+    // 注意:abort() 只丢弃已写入内容,create(create:true) 建出的 0 字节文件
+    // 仍会留在磁盘上,必须显式 removeEntry。
+    const tryRemoveFile = async (dirHandle, name) => {
+      if (!dirHandle) return;
+      try { await dirHandle.removeEntry(name); } catch (_) {}
+    };
+
     // 流式写入目录(大文件边下边写,避免 OOM);无目录则读入内存 blob 兜底
+    // 失败时必须 abort() 掉 writable:createWritable() 会一直持有该文件的写锁,
+    // 不 abort/close 就直接重试下一个镜像的话,后续 getFileHandle()+createWritable()
+    // 会抛 NoModificationAllowedError,导致该轨道永久失败并在磁盘留下半成品。
     const streamToDir = async (urls, dirHandle, name, label) => {
       if (!Array.isArray(urls)) urls = [urls];
       for (const url of urls) {
+        let writable = null;
         try {
           if (signal.aborted) throw new Error("Aborted");
           let res;
@@ -1823,7 +1850,6 @@
           }
           const total = Number(res.headers.get("content-length")) || 0;
           if (!res.ok || !res.body) continue;
-          let writable = null;
           if (dirHandle) {
             const fh = await dirHandle.getFileHandle(name, { create: true });
             writable = await fh.createWritable();
@@ -1831,7 +1857,7 @@
           const reader = res.body.getReader();
           const chunks = []; let loaded = 0; const start = performance.now(); let lastUpd = 0;
           while (true) {
-            if (signal.aborted) { try { await writable?.abort(); } catch (_) {} throw new Error("Aborted"); }
+            if (signal.aborted) throw new Error("Aborted");
             const { done, value } = await raceRead(reader);
             if (done) break;
             if (writable) await writable.write(value);
@@ -1846,7 +1872,12 @@
               _updateDetail();
             }
           }
-          if (writable) { await writable.close(); }
+          // CDN 提前断开(chunked 截断)时 reader 会正常 done,但字节数不足;
+          // 这种半成品 mux 播放器打不开,必须当失败处理并换镜像。
+          if (total > 0 && loaded < total) {
+            throw new Error(`INCOMPLETE: ${loaded}/${total} bytes`);
+          }
+          if (writable) { await writable.close(); writable = null; }
           else {
             const buf = new Uint8Array(loaded);
             let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
@@ -1855,6 +1886,10 @@
           _prog.v = `${label}: ✓`; _updateDetail();
           return true;
         } catch (e) {
+          // 先丢弃写到一半的内容,释放文件锁,再删掉残骸,然后换下一个镜像
+          try { if (writable) await writable.abort(); } catch (_) {}
+          writable = null;
+          await tryRemoveFile(dirHandle, name);
           if (e?.message === 'Aborted' || signal.aborted) throw e;
           console.warn(`[Batch] stream ${label} URL failed:`, e);
         }
@@ -1875,8 +1910,13 @@
       return 0;
     };
 
-    // 下载单集到目录(或 blob 兜底)。返回 true=成功 false=失败
-    const batchDownloadEpisode = async (ep, epIdx, total, dirHandle, collectionTitle) => {
+    // 下载单集(单次尝试)。返回:
+    //   true      成功
+    //   'skip'    不可恢复的失败(如 blob 模式下的超大文件),重试没有意义
+    //   false     可重试的失败(403 / 网络中断 / 截断 / 写盘失败)
+    // 每次尝试都重新调 resolveEpisodeDash 拿全新的签名地址 —— B 站 CDN 地址
+    // 有有效期且按 IP 限流,批量连拉十几集后旧地址会整批回 403。
+    const batchDownloadEpisodeOnce = async (ep, epIdx, total, dirHandle, collectionTitle) => {
       overlay.setBatchInfo(`${T.batchDl}: ${epIdx+1}/${total} - ${ep.title || ''}`);
       overlay.setBatchProgress(Math.round(epIdx / total * 100));
       overlay.setProgress(0);
@@ -1916,17 +1956,27 @@
         overlay.setStep(T.batchTooLarge);
         overlay.setDetail(T.batchBlobTooLarge);
         console.warn('[Batch] ep too large for blob fallback, skipping:', ep.title, fmtBytes(estTotal));
-        return false;
+        return 'skip';
       }
 
       // 5a. 大文件 → 分轨流式写入目录(仅 dirHandle 模式;blob 模式已在 4b 拦截)
       if (estTotal > 0 && estTotal > BATCH_MERGE_THRESHOLD) {
         overlay.setStep(T.batchTooLarge);
         _prog.v = ''; _prog.a = '';
-        const vOk = await streamToDir(vAllUrls, dirHandle, `${T.video}-${fname}.mp4`, T.video);
+        const vName = `${T.video}-${fname}.mp4`;
+        const aName = `${T.audio}-${fname}.m4a`;
+        const vOk = await streamToDir(vAllUrls, dirHandle, vName, T.video);
         if (signal.aborted) throw new Error("Aborted");
-        const aOk = await streamToDir(aAllUrls, dirHandle, `${T.audio}-${fname}.m4a`, T.audio);
-        return vOk && aOk;
+        // 视频轨失败就不要单独产出音频:用户看到的会是一集"只有声音"的文件,
+        // 而且计数里记为成功。清掉残骸并按失败上报,方便用户重试该集。
+        if (!vOk) {
+          await tryRemoveFile(dirHandle, vName);
+          console.warn('[Batch] video track failed, skipping audio for:', ep.title);
+          return false;
+        }
+        const aOk = await streamToDir(aAllUrls, dirHandle, aName, T.audio);
+        // 音频失败时保留视频(单独可播),但该集整体算失败,便于用户察觉
+        return aOk;
       }
 
       // 5b. 小文件 → 内存合并
@@ -1943,17 +1993,26 @@
         if (!dirHandle) {
           overlay.setStep(T.batchTooLarge);
           overlay.setDetail(T.batchBlobTooLarge);
+          return 'skip';
+        }
+        const vName = `${T.video}-${fname}.mp4`;
+        const aName = `${T.audio}-${fname}.m4a`;
+        const vOk = await streamToDir(vAllUrls, dirHandle, vName, T.video);
+        if (signal.aborted) throw new Error("Aborted");
+        if (!vOk) {
+          await tryRemoveFile(dirHandle, vName);
+          console.warn('[Batch] video track failed, skipping audio for:', ep.title);
           return false;
         }
-        const vOk = await streamToDir(vAllUrls, dirHandle, `${T.video}-${fname}.mp4`, T.video);
-        if (signal.aborted) throw new Error("Aborted");
-        const aOk = await streamToDir(aAllUrls, dirHandle, `${T.audio}-${fname}.m4a`, T.audio);
-        return vOk && aOk;
+        const aOk = await streamToDir(aAllUrls, dirHandle, aName, T.audio);
+        return aOk;
       }
 
       // 实际大小超阈值 → 分轨写(此时数据已在内存,writeToDir 不再累积)
       if (vBin.byteLength + aBin.byteLength > BATCH_MERGE_THRESHOLD) {
         overlay.setStep(T.batchTooLarge);
+        // 注意:writeToDir 失败会降级 saveBlob(文件进浏览器下载目录)并返回 false,
+        // 所以 false 表示"换了保存位置",不代表该轨道失败 —— 不能用它判断成败。
         const vOk = await writeToDir(dirHandle, `${T.video}-${fname}.mp4`, vBin);
         const aOk = await writeToDir(dirHandle, `${T.audio}-${fname}.m4a`, aBin);
         vBin = null; aBin = null;
@@ -1987,6 +2046,31 @@
         }
         return false;
       }
+    };
+
+    // 重试包装:失败后退避 3s,重新解析(拿新签名地址)再试一次。
+    // 只重试可恢复的失败;'skip' 直接上报失败,避免无谓地拖长批量时间。
+    const BATCH_RETRY_DELAY_MS = 3000;
+    const BATCH_MAX_ATTEMPTS = 2; // 首次 + 1 次重试
+    const batchDownloadEpisode = async (ep, epIdx, total, dirHandle, collectionTitle) => {
+      for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
+        if (signal.aborted) throw new Error("Aborted");
+        if (attempt > 1) {
+          overlay.setStep(T.batchRetrying);
+          overlay.setDetail(ep.title || '');
+          // 等一会儿再重新解析:B 站的 403 多是短时限流,立刻重试大概率还是 403
+          await sleep(BATCH_RETRY_DELAY_MS);
+          if (signal.aborted) throw new Error("Aborted");
+        }
+        const r = await batchDownloadEpisodeOnce(ep, epIdx, total, dirHandle, collectionTitle);
+        if (r === true) return true;
+        if (r === 'skip') return false;
+        if (attempt < BATCH_MAX_ATTEMPTS) {
+          console.warn(`[Batch] episode attempt ${attempt} failed, retrying with fresh URLs:`, ep.title);
+        }
+      }
+      console.warn('[Batch] episode failed after retries:', ep.title);
+      return false;
     };
 
     // 批量下载主流程
@@ -2051,26 +2135,30 @@
 
       // 5. 串行下载(集间间隔 1.5s 防风控)
       let ok = 0, fail = 0;
+      const failedNames = [];
       for (let i = 0; i < selected.length; i++) {
         if (signal.aborted) break;
         const epIdx = selected[i];
         const ep = episodes[epIdx];
         try {
           const success = await batchDownloadEpisode(ep, i, selected.length, dirHandle, collectionTitle);
-          if (success) ok++; else fail++;
+          if (success) ok++; else { fail++; failedNames.push(ep?.title || `P${i+1}`); }
         } catch (e) {
           if (e?.message === 'Aborted' || signal.aborted) break;
           console.warn('[Batch] episode failed:', ep?.title, e);
-          fail++;
+          fail++; failedNames.push(ep?.title || `P${i+1}`);
         }
-        if (i < selected.length - 1 && !signal.aborted) await sleep(1500);
+        // 2s 间隔(原 1.5s):连续拉流更容易触发 CDN 限流,放宽一点
+        if (i < selected.length - 1 && !signal.aborted) await sleep(2000);
       }
 
       // 6. 完成
       overlay.setBatchProgress(100);
       overlay.setProgress(100);
       overlay.setStep(T.batchDone);
-      overlay.setDetail(fail === 0 ? `${ok}/${selected.length}` : `${ok}/${selected.length} (${fail} ${T.batchEpFail})`);
+      // 列出失败集名(最多 5 个),否则用户只知道"N 集失败"却不知道是哪几集
+      const failList = failedNames.slice(0, 5).join('、') + (failedNames.length > 5 ? '…' : '');
+      overlay.setDetail(fail === 0 ? `${ok}/${selected.length}` : `${ok}/${selected.length} (${fail} ${T.batchEpFail}: ${failList})`);
       overlay.done();
     };
 

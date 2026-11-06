@@ -95,6 +95,14 @@ If you trigger the rescue mechanism and download split files, you can use them i
 
 ## 📅 Changelog
 
+### v1.2.18 (2026-11-06)
+- **Fix**: Batch download could leave episodes with audio only and no video. Root cause: when a split-track stream failed, the file's write lock was never released, so the retry against the next CDN mirror threw `NoModificationAllowedError`. The video track then failed permanently while the audio track (a different filename) completed normally — leaving an audio-only episode. Every failure now calls `abort()`, deletes the partial file, and retries the next mirror.
+- **Fix**: When the video track fails, no standalone audio file is produced any more (it used to leave a "sound only" episode). The episode is counted as failed and named in the summary.
+- **Fix**: Truncated responses (CDN closes early, fewer bytes than `Content-Length`) are no longer treated as success — previously they silently left an unplayable partial video.
+- **Fix**: Batch download of UGC collections lost each episode's own BV id, so playurl was requested with the collection's entry BV and a mismatched bvid/cid produced a 412 that skipped the episode. The episode list now carries `bvid`, and multi-section collections are flattened.
+- **Improved**: The batch summary names the failed episodes (up to 5) instead of only counting them.
+- **Improved**: Failed batch episodes are retried automatically. On a failure (CDN 403, dropped connection, truncated file) the extension now waits 3s, **re-requests playurl for a freshly signed URL**, and tries once more — instead of only rotating through the stale mirrors it already had. The inter-episode delay went from 1.5s to 2s to reduce the chance of tripping Bilibili's CDN rate limit.
+
 ### v1.2.17 (2026-09-19)
 - **Fix**: Split-download audio no longer falls into the browser's default download folder on long videos. Root cause: the OK click on a native confirm dialog does not grant the page user activation, so the second save picker was rejected with SecurityError. Confirmation now uses an in-page overlay dialog (a real button click), so the audio picker always opens and both tracks land in the same folder.
 - **Fix**: A mid-stream audio failure no longer leaves a 0-byte file in the chosen folder. Partial writes are discarded (`writable.abort()`), the next CDN mirror is retried, and blob fallback (with an explicit notice) happens only after all mirrors fail.

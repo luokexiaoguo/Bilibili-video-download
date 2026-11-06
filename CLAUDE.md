@@ -18,7 +18,18 @@ There is no linter, formatter, or test suite configured. The only automated chec
 
 Version lives in `manifest.json` (`version`). Each release bumps it and adds a changelog entry to the top of the "更新日志" sections in **both** `README.md` and `README_EN.md` (keep them in sync). The release zip is built into `dist/` (gitignored) — no script automates this (see Packaging below).
 
-**Release pushes go ONLY to `main` (GitHub + Gitee), never `master`** — despite active development happening on `master`, release commits/tags are pushed to `main`. Keep `dist/` containing only the newest version's zip when packaging. When committing a version bump, use message format `v<version>: <summary>` (e.g. `v1.2.16: fix batch download collection title leaking into filenames`).
+**Release pushes go ONLY to `main` (GitHub + Gitee), never `master`.** Development now also happens directly on `main` — `master` is stale (last touched at v1.2.15) and is kept only as a historical branch. Keep `dist/` containing only the newest version's zip when packaging. When committing a version bump, use message format `v<version>: <summary>` (e.g. `v1.2.16: fix batch download collection title leaking into filenames`).
+
+### Remotes & auth (configured 2026-10-29)
+
+Both remotes are **SSH** and both work without a proxy:
+
+- `origin` → `git@github.com:luokexiaoguo/Bilibili-video-download.git`
+- `gitee` → `git@gitee.com:luokexiaoguo/Bilibili-video-download.git`
+
+Both use the dedicated key `~/.ssh/id_ed25519_git` (do not use `id_ed25519_opc_server` — that belongs to another service). `~/.ssh/config` routes `github.com` through **`ssh.github.com:443`** because this network's router DNS resolves `github.com` to `127.0.0.1`; plain HTTPS git to github.com is therefore dead, but SSH-over-443 works. Do not "fix" the origin URL back to HTTPS.
+
+`gh` CLI is authenticated as `luokexiaoguo` (scopes `gist, read:org, repo, workflow`, stored in the keyring). `api.github.com` resolves fine and needs no proxy; if it ever stops, prefix commands with `HTTPS_PROXY=http://127.0.0.1:7897` (a Clash Verge instance listens there).
 
 **Sponsor links must never be dropped.** The afdian sponsor entry is intentional and permanent:
 - `.github/FUNDING.yml` — `custom: https://afdian.com/a/luokexiaoguo` (drives the "Sponsor this project" button on the GitHub repo sidebar)
@@ -26,9 +37,11 @@ Version lives in `manifest.json` (`version`). Each release bumps it and adds a c
 
 When updating READMEs (changelog, features, etc.), preserve these sponsor elements as-is. If a README rewrite or refactor removes them, restore them in the same commit. The FUNDING.yml file must always be present on `main`. Also preserve the "💡 快速安装 / Quick Install" blockquote near the top of both READMEs (points users to the Edge/Chrome web stores — search "B站离线舱") — it is intentional store-funnel content.
 
+**No paywall / no activation codes — ever.** Sponsorship is voluntary and buys nothing. Do NOT reintroduce gating of any feature (HDR, 8K, batch, etc.) behind payment, activation codes, device binding, or a license server. A sponsorship-activation system (Cloudflare Worker + Vercel proxy + in-popup code claim) was built on the `activation-system` branch in July 2026 and was deliberately **deleted** on 2026-10-29 — the user does not want a paid tier. Reasons it was killed, in case anyone is tempted to rebuild it: the `*.workers.dev` / `*.vercel.app` endpoints are unreachable from mainland China without a proxy, the Vercel proxy returned no CORS headers and ~5% 500s, and `checkActivation()` would have blocked the download click for up to 16s on every unactivated device. If a sponsorship acknowledgement is ever wanted, put it in the README, not in the extension code.
+
 ### Packaging (manual, no script)
 
-The release zip is built with PowerShell `Compress-Archive` into `dist/BiliDown-v<version>.zip` (~17.4 MB). Exclude these from the zip (they are NOT part of the extension): `_metadata`, `dist`, `afdian-worker`, `vercel-api`, `.git`, `.claude`, `content_merge.js.bak_v1.2.5`, `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md`. Copy the remaining root entries to a temp dir, compress, delete temp. Verify the zip listing afterwards — `.claude/settings.local.json` once leaked into a package. Delete the previous version's zip first (keep only newest).
+The release zip is built with PowerShell `Compress-Archive` into `dist/BiliDown-v<version>.zip` (~17.4 MB). Exclude these from the zip (they are NOT part of the extension): `_metadata`, `dist`, `.git`, `.claude`, `content_merge.js.bak_v1.2.5`, `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md`. Copy the remaining root entries to a temp dir, compress, delete temp. Verify the zip listing afterwards — `.claude/settings.local.json` once leaked into a package. Delete the previous version's zip first (keep only newest).
 
 ## Architecture
 
@@ -113,6 +126,8 @@ Large files (>threshold) are split into separate video/audio downloads instead o
 - Combined progress in overlay: `"视频: 1.2GB/8.4GB 15% | 音频: ✓"`
 - All split fetches pass `signal`; on abort the overlay is removed (no stuck download).
 - **Writable cleanup**: `createWritable()` puts the file entry on disk immediately. Any failure mid-stream MUST `w.abort()` (discards partial content) and continue to the next mirror URL before falling back to blob — otherwise the user's chosen folder keeps a 0-byte corpse while a complete copy lands in the default dir.
+  - The lock matters as much as the corpse: `createWritable()` holds an exclusive write lock on that filename until `close()` or `abort()`. Skipping `abort()` before retrying makes the *next* `createWritable()` throw `NoModificationAllowedError`, so the track fails permanently. In batch mode this was the root cause of "episodes from #3 onward have audio only" (v1.2.18). `abort()` also leaves a 0-byte entry behind, so `streamToDir` additionally calls `removeEntry()`.
+  - A stream that ends with fewer bytes than `Content-Length` is a failure (`INCOMPLETE`), not a success — a truncated mux is unplayable.
 - **Stall watchdog**: every `reader.read()` goes through `raceRead()` (60s idle timeout → cancels the body → caller's URL-retry loop moves to the next mirror). A hung CDN connection otherwise freezes the download forever with no error.
 
 ### Memory-Safety & Cleanup
@@ -126,11 +141,12 @@ Large files (>threshold) are split into separate video/audio downloads instead o
 A second popup button (`#batch`) sets `window.__BILI_BATCH__ = true` before injecting `content_merge.js`, which branches into `runBatch()` instead of the single-download flow. Batch download grabs all episodes of a collection/multi-part and downloads them serially into one user-chosen directory.
 
 - **Episode discovery** (`getCollectionEpisodes`): unifies UGC合集 (`ugc_season.sections[].episodes`, each ep is an **independent BV**), series, regular multi-P (`pages`), bangumi (`ss`/`ep` season endpoints), and cheese (`epList`). Returns `[{cid, bvid, epId, title, isBangumi?, isCheese?}]`.
+  - The fast path reads `getMultiPartInfo()` from `__INITIAL_STATE__`. `getMultiPartInfo` MUST carry `bvid` for UGC合集 and series pages — they are independent BVs. It used to drop it, so the fast path returned `bvid: undefined` for every episode and `resolveEpisodeDash` fell back to the collection's entry BV → bvid/cid mismatch → 412 on every episode. Do not add a `pages` shape without `bvid` for these two sources.
 - **Collection title** (`_batchCollectionTitle`): a module-level variable written by `getCollectionEpisodes` and read by `runBatch`. MUST be the collection/season name (e.g. `ugc_season.title` for UGC, `result.title` for bangumi), NOT `document.title` and NOT `videoData.title` read from `__INITIAL_STATE__` at runtime — both reflect the currently-playing episode, not the collection, causing the currently-playing episode's title to leak into every downloaded filename. Fallback: BV id or `ss<id>`.
 - **Per-episode dash** (`resolveEpisodeDash`): MUST use each episode's own `bvid` (UGC合集) — calling `resolveBilibili` directly falls back to `getBvid()` which returns the collection's entry BV, causing bvid/cid mismatch → 412. Routes to `pgc/player/web/playurl` for bangumi, `p/player/playurl` for cheese, `x/player/playurl` otherwise.
 - **Save mode**: `showDirectoryPicker({mode:'readwrite'})` once in the user-gesture window → all episodes write into that directory. If the picker is cancelled/rejected (system dir)/unsupported → confirm dialog → fall back to `saveBlob` per file into the browser default download dir. **Large episodes (>threshold) are skipped in blob mode** (would OOM); only the directory mode can stream-split large episodes. Audio + video always share the same `dirHandle`; audio never falls back to default dir when a dirHandle is present.
-- **Per-episode logic** (`batchDownloadEpisode`): probe size → small files merge in memory via a reused FFmpeg singleton (`_batchFFmpeg`, loaded once across the batch); large files stream-split to video.mp4 + audio.m4a in the same dir. FFmpeg FS files are `unlink`ed after each episode (including on failure) to prevent stale-data bleed across the singleton. `fetchBinBatch` failure with no dirHandle skips the episode (can't stream without a handle).
-- **Throttling**: serial loop with `await sleep(1500)` between episodes to avoid playurl 412 风控. All fetches share one `AbortController`/`signal` from the overlay.
+- **Per-episode logic** (`batchDownloadEpisode`): probe size → small files merge in memory via a reused FFmpeg singleton (`_batchFFmpeg`, loaded once across the batch); large files stream-split to video.mp4 + audio.m4a in the same dir. **The two tracks are coupled on the split path**: if the video track fails, the audio is not downloaded at all and the partial video is removed — otherwise the user gets an audio-only episode that looks like a success. (`writeToDir`'s `false` return only means "fell back to `saveBlob`", so it is NOT a failure signal.) FFmpeg FS files are `unlink`ed after each episode (including on failure) to prevent stale-data bleed across the singleton. `fetchBinBatch` failure with no dirHandle skips the episode (can't stream without a handle).
+- **Throttling & retry**: serial loop with `await sleep(2000)` between episodes to avoid playurl 412 风控. Each episode is wrapped by `batchDownloadEpisode`, which calls `batchDownloadEpisodeOnce` up to `BATCH_MAX_ATTEMPTS` (2) times with a 3s backoff. The retry **re-runs `resolveEpisodeDash`**, i.e. it fetches a freshly signed CDN URL — rotating mirrors within an old playurl response does not help, because Bilibili's URLs are time-limited and rate-limited per IP; a batch of 10+ episodes reliably gets 403s from every mirror. `batchDownloadEpisodeOnce` returns `true` / `false` (retryable) / `'skip'` (unrecoverable — e.g. oversized episode in blob mode); only `false` is retried. All fetches share one `AbortController`/`signal` from the overlay.
 - **Overlay**: `setBatchMode(true)` reveals a second progress line (`setBatchInfo` "第 N/M 集") + a total-progress bar (`setBatchProgress`), independent of the per-episode detail/progress line.
 
 ### URL Pattern Support
@@ -180,7 +196,6 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 - `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version. Still serves FFmpeg file HEAD-verification + extension ID to the bridge.
 - `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`. The batch button sets `window.__BILI_BATCH__ = true` the same way.
 - `.github/SPONSOR_GUIDE.md` — untracked local doc describing the afdian sponsor setup for AI agents; not committed per user decision. Do not include in commits.
-- `afdian-worker/` / `vercel-api/` — Activation-code verification Worker (Cloudflare + Vercel proxy). Inactive: this checkout holds only Wrangler/Vercel local dev state (`.wrangler/`, `.vercel/`); the actual source (`worker.js`, `wrangler.toml`, `api/activate.js`, `api/claim-api.js`, `api/status.js`, `vercel.json`) lives on the `activation-system` branch. Untracked — do not commit.
 - Root `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md` — unrelated poster-generation tooling, not part of the extension; ignore.
 
 ## Store Distribution
