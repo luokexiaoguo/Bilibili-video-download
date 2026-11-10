@@ -2049,11 +2049,16 @@
       // 实际大小超阈值 → 分轨写(此时数据已在内存,writeToDir 不再累积)
       if (vBin.byteLength + aBin.byteLength > BATCH_MERGE_THRESHOLD) {
         overlay.setStep(T.batchTooLarge);
+        const vName = `${T.video}-${fname}.mp4`;
+        const aName = `${T.audio}-${fname}.m4a`;
         // 注意:writeToDir 失败会降级 saveBlob(文件进浏览器下载目录)并返回 false,
         // 所以 false 表示"换了保存位置",不代表该轨道失败 —— 不能用它判断成败。
-        const vOk = await writeToDir(dirHandle, `${T.video}-${fname}.mp4`, vBin);
-        const aOk = await writeToDir(dirHandle, `${T.audio}-${fname}.m4a`, aBin);
+        // 但这里两条轨道都已经完整拿到,不存在"视频失败只剩音频"的情况。
+        const vOk = await writeToDir(dirHandle, vName, vBin);
+        const aOk = await writeToDir(dirHandle, aName, aBin);
         vBin = null; aBin = null;
+        // 视频落到默认目录时,用户选定的文件夹里可能已留下一个 0 字节条目。
+        if (!vOk && dirHandle) await tryRemoveFile(dirHandle, vName);
         return vOk && aOk;
       }
 
@@ -2076,11 +2081,16 @@
         try { _batchFFmpeg?.FS("unlink", "out.mp4"); } catch (_) {}
         try { _batchFFmpeg?.FS("unlink", "v.m4s"); } catch (_) {}
         try { _batchFFmpeg?.FS("unlink", "a.m4s"); } catch (_) {}
+        // 合并失败降级为分轨保存。此时两轨数据都还在内存里,所以不能只写
+        // 成功的那一条:必须两轨都真正落位,否则用户会拿到半套文件。
         if (vBin && aBin) {
-          await writeToDir(dirHandle, `${T.video}-${fname}.mp4`, vBin);
-          await writeToDir(dirHandle, `${T.audio}-${fname}.m4a`, aBin);
+          const vName = `${T.video}-${fname}.mp4`;
+          const aName = `${T.audio}-${fname}.m4a`;
+          const vOk = await writeToDir(dirHandle, vName, vBin);
+          const aOk = await writeToDir(dirHandle, aName, aBin);
           vBin = null; aBin = null;
-          return true;
+          if (!vOk && dirHandle) await tryRemoveFile(dirHandle, vName);
+          return vOk && aOk;
         }
         return false;
       }

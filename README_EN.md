@@ -101,6 +101,7 @@ If you trigger the rescue mechanism and download split files, you can use them i
 - **New**: The panel also carries collapsible usage tips, the afdian sponsor link, and the feedback email.
 - **Fix**: A second download on the same page did nothing. The re-injection guard flag was never reset, so the script returned immediately and users had to reload the page. It is now reset when a run ends, along with the overlay and its listeners.
 - **Fix**: After a batch download, "one-click download" incorrectly started the batch flow. The single-download entry point now clears the batch flag explicitly.
+- **Fix**: Batch collections could still produce audio-only episodes. On the in-memory split path (actual size over threshold, or FFmpeg merge failure falling back to split), a failed video write was silently downgraded to the browser default download folder while the audio still landed in the chosen folder — and the episode was counted as successful. Both paths now confirm the video actually landed, remove the residue on failure, and report the episode as failed.
 - **Improved**: The in-page button follows the language chosen in the popup, applied live without a reload. Previously it only looked at the browser locale, so English users saw Chinese.
 - **Improved**: Multi-layer fallback selectors keep the button mounted when Bilibili renames the control bar; if nothing is recognised it degrades to a floating button.
 
