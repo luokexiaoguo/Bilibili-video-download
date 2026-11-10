@@ -3,6 +3,31 @@
   // 没有守卫的话,反复下载会叠加多个 overlay 和 window 监听器(内存泄漏)。
   if (window.__BILI_DRIVER_ACTIVE__) return;
   window.__BILI_DRIVER_ACTIVE__ = true;
+
+  // ---- 清理/重置机制 ----
+  // 守卫标记以前一旦置位就永不复位,导致同一页面第二次点下载静默失败
+  // (脚本直接 return,什么都不发生),用户只能刷新页面。页面内下载按钮会
+  // 让点第二次变得很常见,所以这里统一提供 teardown:
+  //   1) 移除 overlay 与所有 window 监听器
+  //   2) abort 掉未完成的下载
+  //   3) 复位 __BILI_DRIVER_ACTIVE__
+  // 对外暴露 window.__BILI_DRIVER_TEARDOWN__,供重新注入前主动拆除上一次。
+  let _teardownFns = [];
+  let _tornDown = false;
+  // 下载进行中标记:页面按钮据此判断"再来一次"应该拒绝还是重开,
+  // 避免第二次点击把正在跑的下载直接打断。
+  window.__BILI_DRIVER_BUSY__ = true;
+  const registerTeardown = (fn) => { _teardownFns.push(fn); };
+  const teardown = () => {
+    if (_tornDown) return;
+    _tornDown = true;
+    for (const fn of _teardownFns.splice(0)) { try { fn(); } catch (_) {} }
+    window.__BILI_DRIVER_ACTIVE__ = false;
+    window.__BILI_DRIVER_BUSY__ = false;
+    try { delete window.__BILI_DRIVER_TEARDOWN__; } catch (_) { window.__BILI_DRIVER_TEARDOWN__ = null; }
+  };
+  window.__BILI_DRIVER_TEARDOWN__ = teardown;
+
   try {
     console.log("[BilibiliDownloader] Script started");
 
@@ -214,14 +239,23 @@
         return b;
       };
 
-      const cancelBtn = mkBtn(T.cancel, "#ff6b6b", () => { if (confirm(T.confirmCancel)) { controller.abort(); my.remove(); } });
+      const cancelBtn = mkBtn(T.cancel, "#ff6b6b", () => { if (confirm(T.confirmCancel)) { controller.abort(); teardown(); } });
       btnArea.appendChild(cancelBtn);
       document.body.appendChild(el);
 
       const my = {};
-      my.remove = () => { window.removeEventListener("mousemove", onMouseMove); window.removeEventListener("mouseup", onMouseUp); try { el.remove(); } catch (_) {} };
+      my.remove = () => {
+        if (my._removed) return;
+        my._removed = true;
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+        try { el.remove(); } catch (_) {}
+      };
+      // 外部 teardown 时也要摘掉 DOM
+      registerTeardown(my.remove);
       return {
-        remove: () => my.remove(),
+        // 公开的 remove = 完整拆卸(含守卫复位),这样任何结束路径都能再次下载
+        remove: () => teardown(),
         setStep: t => { stepDiv.textContent = t; },
         setProgress: p => { barDiv.style.width = Math.max(0, Math.min(100, p)) + "%"; },
         setDetail: t => { detailDiv.textContent = t; },
@@ -232,9 +266,11 @@
           return b;
         },
         done: () => {
+          // 下载已结束:不再 busy,允许用户马上再下一次
+          window.__BILI_DRIVER_BUSY__ = false;
           cancelBtn.textContent = T.close;
           cancelBtn.style.cssText = "background:transparent;border:none;color:#fff;cursor:pointer;font-size:12px;padding:0;text-decoration:none;";
-          cancelBtn.onclick = () => my.remove();
+          cancelBtn.onclick = () => teardown();
         },
         // In-page confirmation. MUST be used instead of window.confirm() whenever a
         // file picker follows: a click on a real DOM button grants transient user
@@ -265,7 +301,7 @@
         resetCancel: () => {
           cancelBtn.textContent = T.cancel;
           cancelBtn.style.cssText = "background:transparent;border:none;color:#ff6b6b;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;";
-          cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); my.remove(); } };
+          cancelBtn.onclick = () => { if (confirm(T.confirmCancel)) { controller.abort(); teardown(); } };
         },
         // 批量模式:显示总进度信息 + 总进度条
         setBatchMode: (on) => {
@@ -277,7 +313,9 @@
       };
     })();
 
-    window.addEventListener("BILI_DOWN_STATUS", e => { if (e.detail) window.dispatchEvent(new CustomEvent("BILI_BRIDGE_STATUS_UPDATE", { detail: e.detail })); });
+    const _onDownStatus = e => { if (e.detail) window.dispatchEvent(new CustomEvent("BILI_BRIDGE_STATUS_UPDATE", { detail: e.detail })); };
+    window.addEventListener("BILI_DOWN_STATUS", _onDownStatus);
+    registerTeardown(() => window.removeEventListener("BILI_DOWN_STATUS", _onDownStatus));
 
     const controller = new AbortController();
     const signal = controller.signal;
@@ -2280,6 +2318,7 @@
 
   } catch(err) {
     console.error("[BilibiliDownloader] Fatal:", err);
+    // 先显示错误再 teardown(否则 overlay 已被拆掉,用户看不到原因)
     const el = document.getElementById("bili-download-overlay");
     if (el) {
       const d = el.querySelector("div:nth-child(4)");
@@ -2287,5 +2326,6 @@
     } else {
       alert("脚本错误: " + (err?.message || String(err)));
     }
+    try { teardown(); } catch (_) {}
   }
 })();
