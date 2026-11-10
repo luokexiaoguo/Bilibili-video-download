@@ -76,6 +76,139 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // ------------------------------------------------------------
+  // Page button → run the same injection the popup does.
+  // Lives here so the content script doesn't need `scripting` on its own
+  // and so the panel's click stays the last real user gesture.
+  // ------------------------------------------------------------
+  if (msg.action === 'PAGE_START_DOWNLOAD') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId == null) { sendResponse({ ok: false, error: 'no tab' }); return false; }
+    (async () => {
+      try {
+        const preferHDR = msg.preferHDR === true;
+        const batch = msg.batch === true;
+        // Must follow the language the user picked in the popup — not the
+        // browser locale. chrome.storage.local is the shared source of truth
+        // (see popup.js updateLang); the content script writes it there.
+        let lang = (navigator.language || '').startsWith('zh') ? 'zh' : 'en';
+        try {
+          const stored = await chrome.storage.local.get('bili_lang');
+          if (stored && (stored.bili_lang === 'zh' || stored.bili_lang === 'en')) {
+            lang = stored.bili_lang;
+          }
+        } catch (_) {}
+        const ffmpegUrl = chrome.runtime.getURL('ffmpeg/ffmpeg.min.js');
+        const coreUrl = chrome.runtime.getURL('ffmpeg/ffmpeg-core.js');
+        const coreStUrl = chrome.runtime.getURL('ffmpeg/ffmpeg-core-st.js');
+
+        // Tear down any previous run first — its guard flag would otherwise
+        // make the newly injected script return immediately.
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: () => {
+            try { window.__BILI_DRIVER_TEARDOWN__ && window.__BILI_DRIVER_TEARDOWN__(); } catch (_) {}
+            window.__BILI_DRIVER_ACTIVE__ = false;
+            window.__BILI_BATCH__ = false;
+          },
+        });
+
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['content_bridge.js'],
+          world: 'ISOLATED',
+        });
+
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: (ffmpeg, core, coreSt, lg, hdr, isBatch) => {
+            window.__FFMPEG_URL__ = ffmpeg;
+            window.__FFMPEG_CORE_URL__ = core;
+            window.__FFMPEG_CORE_ST_URL__ = coreSt;
+            window.__BILI_LANG__ = lg;
+            window.__BILI_DOWN_PREF__ = { preferHDR: hdr };
+            window.__BILI_BATCH__ = isBatch;
+          },
+          args: [ffmpegUrl, coreUrl, coreStUrl, lang, preferHDR, batch],
+        });
+
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['ffmpeg/ffmpeg.min.js'],
+          world: 'MAIN',
+        });
+
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['content_merge.js'],
+          world: 'MAIN',
+        });
+
+        await chrome.storage.local.remove('vd_status');
+        sendResponse({ ok: true });
+      } catch (e) {
+        log('[ServiceWorker] PAGE_START_DOWNLOAD failed:', e && e.message);
+        sendResponse({ ok: false, error: (e && e.message) || String(e) });
+      }
+    })();
+    return true; // async response
+  }
+
+  // Page button asks whether a download is already running.
+  // page_button.js lives in the ISOLATED world while content_merge.js runs
+  // in MAIN — `window` is not shared, so the flag must be read from MAIN
+  // here and relayed back.
+  if (msg.action === 'PAGE_IS_BUSY') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId == null) { sendResponse({ busy: false }); return false; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => ({
+        busy: window.__BILI_DRIVER_BUSY__ === true,
+        // A download that crashed before teardown would leave BUSY stuck;
+        // the overlay element is the liveness signal.
+        alive: !!document.getElementById('bili-download-overlay'),
+      }),
+    }).then((r) => sendResponse((r && r[0] && r[0].result) || { busy: false, alive: false }))
+      .catch(() => sendResponse({ busy: false }));
+    return true;
+  }
+
+  // Page button asks whether this page has a collection / multi-P,
+  // so the panel can disable the batch option instead of letting the
+  // user click into an error. Must run in MAIN world (page globals).
+  if (msg.action === 'PAGE_PROBE_COLLECTION') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId == null) { sendResponse({ available: false }); return false; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        try {
+          const st = window.__INITIAL_STATE__ || {};
+          const vd = st.videoData || {};
+          if (vd.pages?.length > 1) return { available: true, count: vd.pages.length };
+          if (st.epList?.length > 1) return { available: true, count: st.epList.length };
+          if (st.mediaInfo?.episodes?.length > 1) return { available: true, count: st.mediaInfo.episodes.length };
+          const ugc = vd.ugc_season;
+          if (ugc) {
+            const eps = ugc.sections?.length
+              ? ugc.sections.reduce((n, s) => n + (s.episodes?.length || 0), 0)
+              : (ugc.episodes?.length || 0);
+            if (eps > 1) return { available: true, count: eps };
+          }
+          if (vd.series?.list?.length > 1) return { available: true, count: vd.series.list.length };
+          return { available: false, count: 0 };
+        } catch (_) { return { available: false, count: 0 }; }
+      },
+    }).then((r) => sendResponse(r?.[0]?.result || { available: false, count: 0 }))
+      .catch(() => sendResponse({ available: false, count: 0 }));
+    return true;
+  }
+
   if (msg.action === 'GET_VERSION') {
     const manifest = chrome.runtime.getManifest();
     sendResponse({ version: manifest.version });

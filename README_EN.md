@@ -17,6 +17,7 @@
 - **Codec Priority**: Prefers H.265 (HEVC) in SDR tracks, otherwise falls back to H.264 (AVC).
 - **Anime Support**: Full support for parsing and downloading Bilibili Anime, Movies, and other Bangumi content.
 - **Collection Batch Download**: A new "Batch Download Collection" button lists all episodes of a collection/multi-part for one-click selection, then downloads them serially into a single folder. Supports UGC collections, video series, regular multi-part, anime seasons, and courses (cheese).
+- **In-Page Download Button**: A "Download" button embedded in the player control bar — no need to hunt for the toolbar icon. Pick quality and download this episode or the whole collection.
 - **Resumable Downloads**: No worries about network fluctuations; supports pausing and resuming download tasks.
 - **Local Merge**: Built-in FFmpeg (Wasm) merges audio and video tracks directly within the browser after download, outputting an MP4 file.
 - **Smart Naming**: Saves as `Video-First10CharsOfTitle.mp4` / `Audio-First10CharsOfTitle.m4a` (automatically cleans emoji and other abnormal characters; uses video title, not page title).
@@ -94,6 +95,14 @@ If you trigger the rescue mechanism and download split files, you can use them i
     ```
 
 ## 📅 Changelog
+
+### v1.2.19 (2026-11-11)
+- **New**: In-page download button. A "Download" button now sits in the player control bar, so the feature is discoverable without opening the toolbar popup. Clicking it opens a panel to pick quality (SDR / HDR) and start either "this episode" or "whole collection" (episode count shown; greyed out when the page has no collection).
+- **New**: The panel also carries collapsible usage tips, the afdian sponsor link, and the feedback email.
+- **Fix**: A second download on the same page did nothing. The re-injection guard flag was never reset, so the script returned immediately and users had to reload the page. It is now reset when a run ends, along with the overlay and its listeners.
+- **Fix**: After a batch download, "one-click download" incorrectly started the batch flow. The single-download entry point now clears the batch flag explicitly.
+- **Improved**: The in-page button follows the language chosen in the popup, applied live without a reload. Previously it only looked at the browser locale, so English users saw Chinese.
+- **Improved**: Multi-layer fallback selectors keep the button mounted when Bilibili renames the control bar; if nothing is recognised it degrades to a floating button.
 
 ### v1.2.18 (2026-11-06)
 - **Fix**: Batch download could leave episodes with audio only and no video. Root cause: when a split-track stream failed, the file's write lock was never released, so the retry against the next CDN mirror threw `NoModificationAllowedError`. The video track then failed permanently while the audio track (a different filename) completed normally — leaving an audio-only episode. Every failure now calls `abort()`, deletes the partial file, and retries the next mirror.

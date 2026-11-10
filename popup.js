@@ -43,11 +43,16 @@ const I18N = {
   }
 };
 
-let currentLang = localStorage.getItem("bili_lang") || (navigator.language.startsWith("zh") ? "zh" : "en");
+// 语言选择必须存 chrome.storage.local,而不是 popup 自己的 localStorage:
+// popup 的 localStorage 属于扩展页面,注入到 bilibili.com 的 content script
+// (page_button.js)读不到,只有 chrome.storage 是两边共享的。
+const _detectedLang = () => (navigator.language.startsWith("zh") ? "zh" : "en");
+let currentLang = localStorage.getItem("bili_lang") || _detectedLang();
 
 function updateLang(lang) {
   currentLang = lang;
   localStorage.setItem("bili_lang", lang);
+  try { chrome.storage.local.set({ bili_lang: lang }); } catch (_) {}
   const t = I18N[lang];
 
   document.querySelectorAll("[data-i18n]").forEach(el => {
@@ -64,7 +69,12 @@ document.getElementById("langToggle").addEventListener("click", () => {
 });
 
 // Initialize language
-updateLang(currentLang);
+// 以 chrome.storage 为准(用户在 popup 里手动切过语言时,这里要跟随),
+// 没有记录时退回 localStorage / 浏览器语言。
+chrome.storage.local.get("bili_lang", (d) => {
+  const lang = d && d.bili_lang;
+  updateLang(lang === "zh" || lang === "en" ? lang : currentLang);
+});
 
 document.getElementById("send").addEventListener("click", async () => {
   const msg = document.getElementById("msg");
@@ -104,6 +114,9 @@ document.getElementById("send").addEventListener("click", async () => {
         window.__FFMPEG_CORE_ST_URL__ = coreSt;
         window.__BILI_LANG__ = lang;
         window.__BILI_DOWN_PREF__ = { preferHDR: hdr };
+        // 必须显式清掉批量标记:上一次批量下载会把它留在 true,
+        // 不清的话这次"一键下载"仍会走 runBatch 流程。
+        window.__BILI_BATCH__ = false;
         console.log('[Popup->Content] Config set: preferHDR =', hdr, '| lang =', lang);
       },
       args: [ffmpegUrl, coreUrl, coreStUrl, currentLang, preferHDR],

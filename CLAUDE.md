@@ -12,7 +12,9 @@ This is an **unpacked extension** — no build step needed. Load the root direct
 
 **Critical**: Do NOT create directories starting with `_` in the project root (except `_locales`). Chrome rejects extensions with such directories (`__pycache__` etc). Note: `_metadata/` appears at root after loading — that's Chrome's own generated file, gitignored, leave it alone.
 
-There is no linter, formatter, or test suite configured. The only automated check available is `node --check <file>` (syntax validation) — run it on every touched JS file before handing changes to the user; content_merge.js is large enough that a stray brace is easy to introduce.
+There is no linter, formatter, or test suite configured, and none is tracked in the repo. The only automated check available is `node --check <file>` (syntax validation) — run it on every touched JS file before handing changes to the user; content_merge.js is large enough that a stray brace is easy to introduce.
+
+Ad-hoc harnesses get written during debugging (jsdom-based DOM tests for `page_button.js`, extracted-function tests for `streamToDir` / the batch retry wrapper) but are intentionally **not committed**: they need `jsdom` from npm and the project has zero dependencies. Rebuild them under `/tmp` when needed rather than adding a `package.json`.
 
 ## Release / Versioning
 
@@ -45,17 +47,23 @@ The release zip is built with PowerShell `Compress-Archive` into `dist/BiliDown-
 
 ## Architecture
 
-Three-layer script architecture with Chrome's ISOLATED/MAIN world separation:
+Three-layer script architecture with Chrome's ISOLATED/MAIN world separation.
+Two entry points converge on the same injection sequence:
 
 ```
-popup.html/popup.js  →  content_bridge.js (ISOLATED world)  ↔  service_worker.js
-                              ↕ CustomEvents
-                        content_merge.js (MAIN world)
+page_button.js (ISOLATED, content script) ─┐
+                                           ├→ service_worker.js
+popup.html / popup.js (extension page) ────┘        │  injects
+                                                    ▼
+                        content_bridge.js (ISOLATED)  ↔  content_merge.js (MAIN)
+                                          ↕ CustomEvents
 ```
 
 ### Key Constraint: MAIN World Cannot Access Chrome APIs
 
 `content_merge.js` runs in the page's MAIN world where `chrome.runtime` is `undefined`. ALL communication with the extension (FFmpeg loading, downloads) MUST go through CustomEvents to `content_bridge.js`, which runs in the ISOLATED world.
+
+**The reverse also holds, and is easier to get wrong:** ISOLATED and MAIN `window` objects are NOT shared. A content script cannot read `window.__BILI_DRIVER_BUSY__` / `__BILI_DRIVER_ACTIVE__` / `__BILI_BATCH__` set by MAIN, and page globals like `__INITIAL_STATE__` are invisible from ISOLATED. When `page_button.js` needs one of those, it sends a message to `service_worker.js`, which reads it via `chrome.scripting.executeScript({ world: 'MAIN', func })` and relays the result back — see `PAGE_IS_BUSY` and `PAGE_PROBE_COLLECTION`. A `window.X` check in an ISOLATED content script silently evaluates to `undefined` (no error), so this class of bug passes every static test.
 
 ### Key Constraint: File Pickers Need Transient User Activation
 
@@ -132,9 +140,24 @@ Large files (>threshold) are split into separate video/audio downloads instead o
 
 ### Memory-Safety & Cleanup
 
-- **Injection guard**: `content_merge.js` re-injects on every click of the download button. A `window.__BILI_DRIVER_ACTIVE__` flag at the top prevents stacking duplicate overlays / window listeners on repeated downloads.
+- **Injection guard + teardown**: `content_merge.js` re-injects on every click of the download button. A `window.__BILI_DRIVER_ACTIVE__` flag at the top prevents stacking duplicate overlays / window listeners on repeated downloads. The flag MUST be reset when a run ends — it used to stay `true` forever, so the second click on the same page silently did nothing (the script returned immediately) and users had to reload. Every terminal path now funnels through `teardown()`, exposed as `window.__BILI_DRIVER_TEARDOWN__` so a caller can dismantle the previous run before injecting again. `overlay.remove()` IS `teardown()`. `window.__BILI_DRIVER_BUSY__` marks a download in flight so the page button can refuse to start a second one (starting again would abort the running one).
 - **Progress throttling**: `fetchBin` updates `overlay.setDetail` at most every 200ms (matching `streamWithProgress`) to avoid high-frequency DOM writes on small chunks.
 - `saveBlob` revokes its object URL after 120s; FFmpeg FS files are `unlink`ed after merge.
+
+### Cross-run Global State
+
+Page globals set for one run (`__BILI_BATCH__`, `__BILI_DOWN_PREF__`, `__FFMPEG_URL__`) persist across runs on the same tab. `__BILI_BATCH__` in particular is read at the top of the main flow: if a batch run leaves it `true` and the next trigger is a single download, the single-download path is skipped entirely and the batch flow starts instead. Every injection entry point must therefore assign ALL of these explicitly rather than only setting the ones it needs — `popup.js` (single) sets `__BILI_BATCH__ = false` for exactly this reason.
+
+### Page Download Button (`page_button.js`)
+
+A content script (ISOLATED world, `content_scripts` in the manifest) that puts a text "下载 / Download" button into the player control bar, so users who never open the toolbar popup can still find the feature.
+
+- **Injection split**: `page_button.js` must NOT call download code or `chrome.scripting`. It only renders UI and sends `PAGE_START_DOWNLOAD` / `PAGE_PROBE_COLLECTION` to the service worker, which runs the exact same injection sequence the popup does. `chrome.runtime` does not exist in MAIN world, and the inverse (calling `scripting` from a page world) is rejected.
+- **Why the panel**: `showSaveFilePicker` needs transient user activation. Clicking the page button, then resolving video info, can burn the ~5s window. So the button opens a small panel (quality + single/batch) and the panel's own button is what starts the download — that click is a fresh activation.
+- **Mounting is best-effort**: Bilibili rebuilds the player DOM on quality switch / fullscreen / theatre mode and swaps videos without a reload. `page_button.js` probes several known control-bar selectors, watches `MutationObserver` + `location.href` (SPA), and falls back to a floating button when no known selector matches. Buttons must never stack: always check for an existing `#bilidown-page-btn` first.
+- **Batch option is probed, not assumed**: `PAGE_PROBE_COLLECTION` reads `__INITIAL_STATE__` in MAIN world and returns `{available, count}`; the panel disables the batch button with a "not a collection" label when the page has no collection/multi-P.
+- **Busy guard**: `window.__BILI_DRIVER_BUSY__` is set by `content_merge.js` while a download runs and cleared in `teardown()` / `done()`. The page button checks it before starting, otherwise a second click would tear down and silently abort the running download.
+- **Language**: `page_button.js` owns its own `STRINGS` table (mirroring the popup's `I18N`) and resolves the language as `chrome.storage.local.bili_lang` → `navigator.language`. It MUST be `chrome.storage`, not `localStorage`: the popup's `localStorage` belongs to the extension page and is invisible to a content script running on bilibili.com, so a user who switched the popup to English would still see Chinese in the player. `popup.js` therefore writes `bili_lang` to `chrome.storage.local` on every toggle, and both sides listen to `chrome.storage.onChanged` so a switch applies live without a reload. Keep the two string tables in sync when adding UI text.
 
 ### Batch Download (合集下载)
 
@@ -192,8 +215,9 @@ The `isHdr` function checks: `x.id` for codec IDs 125/126/127, `color_space` for
 - `rules.json` — DNR rules: Referer injection, CSP removal, CORS fallback, COOP/COEP for SharedArrayBuffer. 4 active rules.
 - `ffmpeg/` — FFmpeg.wasm core files (MT + ST builds); `useMT` picks between them. If WASM fails with "memory import" errors, re-download matching versions from `@ffmpeg/core@0.11.0`. The ST core must be a real ST build — a fake ST (byte-identical to MT) silently breaks first-merge / post-restart downloads.
 - `content_merge.js` — Largest file (~2200 lines): all download/merge/stream logic, overlay UI (incl. `ask()` in-page confirm — required before any picker), Bilibili API parsing, progress display, single-download flow + batch-download flow. Starts with a `__BILI_DRIVER_ACTIVE__` re-injection guard. Batch branch is gated by `window.__BILI_BATCH__`.
+- `page_button.js` — ISOLATED-world content script (declared in `content_scripts`) that mounts the "下载 / Download" button in the player control bar and owns its panel UI. Renders only; every action goes through `service_worker.js`. See its own section above.
 - `content_bridge.js` — ISOLATED↔MAIN world bridge for Chrome API access (FFmpeg file requests only)
-- `service_worker.js` — Background service worker: mostly legacy. Dynamic DNR rule not used in current version. Still serves FFmpeg file HEAD-verification + extension ID to the bridge.
+- `service_worker.js` — Background service worker. Owns injection orchestration: `PAGE_START_DOWNLOAD` runs the same tear-down → bridge → globals → ffmpeg.min.js → content_merge.js sequence the popup uses, and `PAGE_IS_BUSY` / `PAGE_PROBE_COLLECTION` read MAIN-world state on behalf of the ISOLATED page button. Also serves FFmpeg file HEAD-verification + extension ID to the bridge, plus `GET_STORAGE` / `SET_STORAGE` / `DOWNLOAD` / `FETCH_STREAMS`. The dynamic DNR rule (ID 20001) is not used in the current version.
 - `inject_config.js` — 🔴 Legacy — no longer injected. popup.js sets config globals (`window.__FFMPEG_URL__` etc.) directly via `chrome.scripting.executeScript` with a `func`. The batch button sets `window.__BILI_BATCH__ = true` the same way.
 - `.github/SPONSOR_GUIDE.md` — untracked local doc describing the afdian sponsor setup for AI agents; not committed per user decision. Do not include in commits.
 - Root `childrens_day_poster.py`, `poster_compose.py`, `design-philosophy.md` — unrelated poster-generation tooling, not part of the extension; ignore.
