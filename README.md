@@ -10,7 +10,11 @@
 
 > 💡 **快速安装**：本扩展已上架 **Edge / Chrome 扩展商店**，在商店内搜索「**B站离线舱**」即可一键安装，无需手动加载源码。
 
+**关键词**：B站视频下载、Bilibili 视频下载器、B 站视频下载插件、下载 B 站番剧、下载 B 站电影、B站 4K 视频下载、B站合集批量下载、B站课程下载、浏览器扩展、Edge 扩展、Chrome 扩展、FFmpeg.wasm 本地合并
+
 ## ✨ 功能特性
+
+<sub>支持平台：Bilibili 视频（/video）、番剧动画（/bangumi）、影视电影、付费课程（/cheese）。适用于 Microsoft Edge 与 Google Chrome。</sub>
 
 - **高清下载**：支持 Bilibili 4K、1080P+ 等高清画质视频下载。
 - **SDR 优先**：自动排除 HDR / 杜比视界轨道，仅下载 SDR(709) 视频。

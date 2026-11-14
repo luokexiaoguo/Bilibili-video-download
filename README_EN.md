@@ -10,7 +10,11 @@
 
 > 💡 **Quick Install**: Available on the **Edge / Chrome Web Store** — search for "**BiliDown**" (B站离线舱) to install in one click.
 
+**Keywords**: Bilibili video downloader, download Bilibili videos, Bilibili downloader extension, save Bilibili anime, download Bilibili movies, 4K Bilibili download, batch download Bilibili collection, Chrome extension, Edge extension, FFmpeg.wasm local merge
+
 ## ✨ Features
+
+<sub>Supported: Bilibili videos (/video), anime and Bangumi (/bangumi), movies, and paid courses (/cheese). Works on Microsoft Edge and Google Chrome.</sub>
 
 - **HD Download**: Supports downloading Bilibili 4K, 1080P+, and other high-definition videos.
 - **SDR Priority**: Automatically excludes HDR / Dolby Vision tracks, downloading only SDR (709) videos.
