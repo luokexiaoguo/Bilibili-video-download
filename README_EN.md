@@ -14,13 +14,13 @@
 
 ## ✨ Features
 
-<sub>Supported: Bilibili videos (/video), anime and Bangumi (/bangumi), movies, and paid courses (/cheese). Works on Microsoft Edge and Google Chrome.</sub>
+<sub>Supported: Bilibili videos (/video), anime and Bangumi (/bangumi), and movies. Works on Microsoft Edge and Google Chrome.</sub>
 
 - **HD Download**: Supports downloading Bilibili 4K, 1080P+, and other high-definition videos.
 - **SDR Priority**: Automatically excludes HDR / Dolby Vision tracks, downloading only SDR (709) videos.
 - **Codec Priority**: Prefers H.265 (HEVC) in SDR tracks, otherwise falls back to H.264 (AVC).
 - **Anime Support**: Full support for parsing and downloading Bilibili Anime, Movies, and other Bangumi content.
-- **Collection Batch Download**: A new "Batch Download Collection" button lists all episodes of a collection/multi-part for one-click selection, then downloads them serially into a single folder. Supports UGC collections, video series, regular multi-part, anime seasons, and courses (cheese).
+- **Collection Batch Download**: A new "Batch Download Collection" button lists all episodes of a collection/multi-part for one-click selection, then downloads them serially into a single folder. Supports UGC collections, video series, regular multi-part, and anime seasons.
 - **In-Page Download Button**: A "Download" button embedded in the player control bar — no need to hunt for the toolbar icon. Pick quality and download this episode or the whole collection.
 - **Resumable Downloads**: No worries about network fluctuations; supports pausing and resuming download tasks.
 - **Local Merge**: Built-in FFmpeg (Wasm) merges audio and video tracks directly within the browser after download, outputting an MP4 file.
@@ -99,6 +99,10 @@ If you trigger the rescue mechanism and download split files, you can use them i
     ```
 
 ## 📅 Changelog
+
+### v1.2.20 (2026-11-20)
+- **Improved**: Store name and short description tuned for discoverability. The English name is now `Bilibili Video Downloader - 4K & Anime` and the Chinese name is `B站离线舱 - B站视频下载器 4K`, so the extension is easier to find when users search for "bilibili downloader" or "B站视频下载器" in the store. The toolbar short name is unchanged.
+- **Adjusted**: The store summary no longer highlights specific content types and focuses on the general video / anime / movie use case.
 
 ### v1.2.19 (2026-11-11)
 - **New**: In-page download button. A "Download" button now sits in the player control bar, so the feature is discoverable without opening the toolbar popup. Clicking it opens a panel to pick quality (SDR / HDR) and start either "this episode" or "whole collection" (episode count shown; greyed out when the page has no collection).
