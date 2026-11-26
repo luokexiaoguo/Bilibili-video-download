@@ -16,6 +16,11 @@
   if (window.__BILIDOWN_PAGE_BUTTON__) return;
   window.__BILIDOWN_PAGE_BUTTON__ = true;
 
+  // The panel lives in the page, so the QR has to be fetched through the
+  // extension origin. chrome.runtime.getURL is available to content scripts.
+  let QR_URL = '';
+  try { QR_URL = chrome.runtime.getURL('icons/wechat-reward.png'); } catch (_) {}
+
   const ID_BTN = 'bilidown-page-btn';
   const ID_PANEL = 'bilidown-page-panel';
   const ID_STYLE = 'bilidown-page-style';
@@ -53,6 +58,12 @@
       tipsLess: '收起',
       sponsorText: '插件制作不易，如果它确实帮到了你，希望能支持一下！',
       sponsorBtn: '❤️ 爱发电支持',
+      sdTitle: '☕ 支持开发者 · 赞赏 / 定制开发',
+      sdQrTitle: '微信扫码赞赏',
+      sdServices: '各类软件 / 插件定制开发',
+      recTitle: '相关推荐',
+      recName: '干卡下载器',
+      recDesc: 'Windows 下载工具 · 8 线程加速 · 断点续传',
       feedbackLabel: '反馈邮箱：',
     },
     en: {
@@ -80,6 +91,12 @@
       tipsLess: 'Less',
       sponsorText: 'This extension is hard to make. If it has truly helped you, please consider supporting it!',
       sponsorBtn: '❤️ Sponsor on afdian',
+      sdTitle: '☕ Support the developer · Tips / Custom work',
+      sdQrTitle: 'Scan to tip via WeChat',
+      sdServices: 'Custom software & extension development',
+      recTitle: 'Also worth a look',
+      recName: 'GanKa Downloader',
+      recDesc: 'Windows download manager · 8 threads · resume support',
       feedbackLabel: 'Feedback: ',
     },
   };
@@ -169,6 +186,37 @@
 #${ID_PANEL} .bd-sponsor{display:inline-block;padding:4px 16px;border:1px solid rgba(251,114,153,.55);
   border-radius:14px;color:#FB7299;font-size:11px;text-decoration:none;transition:background .15s}
 #${ID_PANEL} .bd-sponsor:hover{background:rgba(251,114,153,.12);text-decoration:none}
+#${ID_PANEL} .bd-sd{margin-top:8px}
+#${ID_PANEL} .bd-sd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  cursor:pointer;background:#2d2d2d;border:1px solid #3a3a3a;border-radius:8px;padding:7px 10px;
+  transition:background .15s;list-style:none}
+#${ID_PANEL} .bd-sd-head::-webkit-details-marker{display:none}
+#${ID_PANEL} .bd-sd-head:hover{background:#343434}
+#${ID_PANEL} .bd-sd-title{font-size:11px;color:#bbb;text-align:left}
+#${ID_PANEL} .bd-sd-arrow{color:#888;font-size:10px;transition:transform .2s;flex:0 0 auto}
+#${ID_PANEL} .bd-sd[open] .bd-sd-arrow{transform:rotate(180deg)}
+#${ID_PANEL} .bd-sd-body{padding:9px 1px 0}
+#${ID_PANEL} .bd-sd-row{display:flex;gap:10px;align-items:flex-start}
+#${ID_PANEL} .bd-sd-qr{width:78px;height:78px;flex:0 0 78px;border-radius:4px;
+  border:1px solid #3a3a3a;background:#fff;display:block}
+#${ID_PANEL} .bd-sd-info{flex:1;min-width:0;font-size:10px;line-height:1.7;color:#888;text-align:left}
+#${ID_PANEL} .bd-sd-info b{display:block;color:#e0e0e0;font-size:11px;font-weight:600;margin-bottom:2px}
+#${ID_PANEL} .bd-sd-mail{display:block;color:#FB7299;text-decoration:none;word-break:break-all}
+#${ID_PANEL} .bd-sd-mail:hover{text-decoration:underline}
+#${ID_PANEL} .bd-sd-actions{margin-top:8px;text-align:center}
+#${ID_PANEL} .bd-rec{margin-top:10px}
+#${ID_PANEL} .bd-rec-title{font-size:10px;color:#666;text-align:left;margin-bottom:5px}
+#${ID_PANEL} .bd-rec-link{display:flex;align-items:center;gap:8px;background:#2d2d2d;
+  border:1px solid #3a3a3a;border-radius:8px;padding:7px 10px;text-decoration:none;
+  transition:background .15s}
+#${ID_PANEL} .bd-rec-link:hover{background:#343434;text-decoration:none}
+#${ID_PANEL} .bd-rec-icon{width:24px;height:24px;flex:0 0 24px;border-radius:6px;
+  background:rgba(251,114,153,.15);color:#FB7299;font-size:12px;display:flex;
+  align-items:center;justify-content:center}
+#${ID_PANEL} .bd-rec-text{flex:1;min-width:0;text-align:left}
+#${ID_PANEL} .bd-rec-text b{display:block;color:#e0e0e0;font-size:11px;font-weight:600}
+#${ID_PANEL} .bd-rec-text span{display:block;color:#888;font-size:9px;line-height:1.4}
+#${ID_PANEL} .bd-rec-go{color:#FB7299;font-size:12px;flex:0 0 auto}
 #${ID_PANEL} .bd-mail{margin-top:6px;font-size:10px;color:#777}
 #${ID_PANEL} .bd-mail a{color:#888;text-decoration:none}
 #${ID_PANEL} .bd-mail a:hover{color:#FB7299;text-decoration:underline}
@@ -181,6 +229,15 @@
   #${ID_PANEL} .bd-tips-body ul{color:#666}
   #${ID_PANEL} .bd-foot p{color:#777}
   #${ID_PANEL} .bd-mail,#${ID_PANEL} .bd-mail a{color:#999}
+  #${ID_PANEL} .bd-sd-head{background:#f2f2f2;border-color:#e0e0e0}
+  #${ID_PANEL} .bd-sd-head:hover{background:#ebebeb}
+  #${ID_PANEL} .bd-sd-title{color:#555}
+  #${ID_PANEL} .bd-sd-info{color:#666}
+  #${ID_PANEL} .bd-sd-info b{color:#222}
+  #${ID_PANEL} .bd-sd-qr{border-color:#e0e0e0}
+  #${ID_PANEL} .bd-rec-link{background:#f2f2f2;border-color:#e0e0e0}
+  #${ID_PANEL} .bd-rec-link:hover{background:#ebebeb}
+  #${ID_PANEL} .bd-rec-text b{color:#222}
 }
 `;
     (document.head || document.documentElement).appendChild(s);
@@ -328,7 +385,36 @@
       </div>
       <div class="bd-foot">
         <p>${T.sponsorText}</p>
-        <a class="bd-sponsor" href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer">${T.sponsorBtn}</a>
+        <details class="bd-sd">
+          <summary class="bd-sd-head">
+            <span class="bd-sd-title">${T.sdTitle}</span>
+            <span class="bd-sd-arrow">▾</span>
+          </summary>
+          <div class="bd-sd-body">
+            <div class="bd-sd-row">
+              <img class="bd-sd-qr" src="${QR_URL}" alt="WeChat reward QR">
+              <div class="bd-sd-info">
+                <b>${T.sdQrTitle}</b>
+                <span>${T.sdServices}</span>
+                <a class="bd-sd-mail" href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a>
+              </div>
+            </div>
+            <div class="bd-sd-actions">
+              <a class="bd-sponsor" href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer">${T.sponsorBtn}</a>
+            </div>
+          </div>
+        </details>
+        <div class="bd-rec">
+          <div class="bd-rec-title">${T.recTitle}</div>
+          <a class="bd-rec-link" href="https://ganskills.com/" target="_blank" rel="noopener noreferrer">
+            <span class="bd-rec-icon">⤓</span>
+            <span class="bd-rec-text">
+              <b>${T.recName}</b>
+              <span>${T.recDesc}</span>
+            </span>
+            <span class="bd-rec-go">→</span>
+          </a>
+        </div>
         <div class="bd-mail">${T.feedbackLabel}<a href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a></div>
       </div>`;
     document.body.appendChild(p);
