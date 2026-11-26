@@ -98,7 +98,42 @@ If you trigger the rescue mechanism and download split files, you can use them i
     ffmpeg -i "Video-TitlePrefix.mp4" -i "Audio-TitlePrefix.m4a" -c copy output.mp4
     ```
 
+## 🧰 Also Recommended
+
+### GanKa Downloader — "a download that only counts once it finishes"
+
+> 🌐 **Website**: <https://ganskills.com/>
+
+If you regularly pull large files, **GanKa Downloader** is worth a look. It is a Windows desktop download manager (not a browser extension) that takes over your browser's downloads — video, audio, archives and installers managed in one place.
+
+**How does it relate to this extension?**
+
+This extension focuses on **parsing Bilibili videos and merging audio/video**. GanKa focuses on **making the transfer itself fast and reliable**. They solve different problems and work well together: small files are fine with this extension alone, while multi-hundred-MB downloads are more stable through the manager.
+
+**Core capabilities**
+
+| Capability | Detail |
+| --- | --- |
+| **8 parallel ranges** | The same file is split by byte range and pulled concurrently — 8 connections by default, up to 32. Measured by the author at 345 KB/s → 3.5 MB/s on the same URL |
+| **Resume anywhere** | Network drops, closed tabs, even a reboot — pick up where it stopped instead of starting over |
+| **Keeps running after the browser closes** | Downloads live in a separate process, so closing the browser does not interrupt them |
+| **Lossless mux** | On sites that serve picture and sound separately, they are merged locally afterwards by copying the original data — no re-encoding |
+| **No sign-up** | No account system, no login data collected, everything runs locally |
+
+**Platform and pricing**
+
+- Windows 10 / 11, works with Chrome / Edge / Brave
+- **15-day free trial**, then ¥30 (US$5) one-time purchase
+- Maintained by an individual developer
+
+> 📌 Note: this is a friendly recommendation, not a paid placement. Both projects share the same author, but they serve different purposes — pick whichever fits your needs.
+
 ## 📅 Changelog
+
+### v1.2.21 (2026-11-26)
+- **New**: A "Also recommended · GanKa Downloader" entry and a collapsible "Support the developer" block (WeChat QR + afdian) at the bottom of both the popup and the in-page panel. All existing sponsor links are unchanged.
+- **New**: After three successful downloads, a one-time prompt in the corner of the page suggests leaving a store review. It appears at most once, can be dismissed, and offers nothing in return (compliant with store policy).
+- **New**: Project website and privacy policy pages (Chinese and English) documenting that all processing is local, that nothing is uploaded, and what each requested permission is used for.
 
 ### v1.2.20 (2026-11-20)
 - **Improved**: Store name and short description tuned for discoverability. The English name is now `Bilibili Video Downloader - 4K & Anime` and the Chinese name is `B站离线舱 - B站视频下载器 4K`, so the extension is easier to find when users search for "bilibili downloader" or "B站视频下载器" in the store. The toolbar short name is unchanged.

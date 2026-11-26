@@ -246,6 +246,7 @@
       const my = {};
       my.remove = () => {
         if (my._removed) return;
+        try { const rt = document.getElementById('bd-review-toast'); if (rt) rt.remove(); } catch (_) {}
         my._removed = true;
         window.removeEventListener("mousemove", onMouseMove);
         window.removeEventListener("mouseup", onMouseUp);
@@ -1374,6 +1375,7 @@
         overlay.setProgress(100);
         overlay.done();
         setTimeout(() => overlay.remove(), 5000);
+        maybeInviteReview();
         return;
       } catch(e) {
         console.warn("[FFmpeg] Merge failed:", e);
@@ -1425,6 +1427,141 @@
       setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch (_) {} }, 120000);
       console.log('[SaveBlob] Triggered:', suggestedName);
       if (callback) callback();
+    };
+
+    // ============================================================
+    // Review invitation (policy-compliant)
+    // CWS/Edge policy forbids *incentivized* or *fraudulent* reviews, but
+    // inviting a user to rate is allowed. Rules we follow:
+    //   - only after 3 successful downloads, and only once ever
+    //   - never ask for "5 stars"; never offer anything in return
+    //   - dismissible, and dismissal is remembered permanently
+    // State goes through the bridge (chrome.storage is unavailable in the
+    // MAIN world).
+    // ============================================================
+    const RATING_DONE_KEY = 'bd_rating_prompt';
+    const RATING_MIN_DOWNLOADS = 3;
+    // Bilibili's own store links; keep them in sync with the README.
+    const REVIEW_URLS = [
+      'https://chromewebstore.google.com/detail/ofbbghlmmeflcpddebdhoobpfjgeehjo',
+      'https://microsoftedge.microsoft.com/addons/detail/edlnheglpfhhabfognopdcpbliijllga',
+    ];
+
+    // Ask the ISOLATED-world bridge for the stored counter, increment it,
+    // and decide whether to show the invitation. Fire-and-forget: a failure
+    // here must never affect the download that just finished.
+    const maybeInviteReview = () => {
+      try {
+        const requestId = 'rating_' + Date.now();
+        const handler = (e) => {
+          if (e.detail?.requestId !== requestId) return;
+          window.removeEventListener('BILI_RATING_STATE', handler);
+          const d = e.detail || {};
+          if (d.shouldPrompt) showReviewToast(d.reviewUrl);
+        };
+        window.addEventListener('BILI_RATING_STATE', handler);
+        window.dispatchEvent(new CustomEvent('BILI_RATING_CHECK', { detail: { requestId } }));
+        // If the bridge never answers, drop the listener so it can't leak.
+        setTimeout(() => window.removeEventListener('BILI_RATING_STATE', handler), 4000);
+      } catch (_) {}
+    };
+
+    const showReviewToast = (reviewUrl) => {
+      if (document.getElementById('bd-review-toast')) return;
+      const lang = window.__BILI_LANG__ || 'zh';
+      const t = lang === 'en'
+        ? {
+            title: 'Glad it worked!',
+            body: 'If this extension helped, a quick store rating would mean a lot.',
+            rate: 'Rate it',
+            later: 'Not now',
+          }
+        : {
+            title: '下载顺利！',
+            body: '如果这个插件帮到了你，去商店给个评价会很有帮助。',
+            rate: '去评价',
+            later: '暂不',
+          };
+
+      const box = document.createElement('div');
+      box.id = 'bd-review-toast';
+      // Appears IMMEDIATELY — the user may close the tab the moment the download
+      // finishes, so any delay means the invitation is simply never seen.
+      // Instead of deferring, sit ABOVE the download overlay: after a fresh
+      // download the overlay still occupies right/bottom 16px for ~5s.
+      // Start below the fold and lift once the real height is known (see the
+      // offsetHeight measurement after mount) — a fixed clearance breaks as
+      // soon as the copy wraps to a different number of lines (en vs zh).
+      // Same metrics as the download overlay so the two cards look like one
+      // system: min 260 / max 360 wide, 16px padding, 8px radius, 14px/1.6.
+      box.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;' +
+        'background:rgba(0,0,0,0.85);color:#fff;border:1px solid rgba(255,255,255,0.12);' +
+        'border-radius:8px;padding:16px;font:14px/1.6 system-ui,sans-serif;' +
+        'box-shadow:0 4px 12px rgba(0,0,0,0.5);min-width:260px;max-width:360px;box-sizing:border-box;' +
+        'transition:bottom .35s ease;';
+      box.innerHTML = '<button class="bd-r-close" aria-label="close" style="position:absolute;top:8px;' +
+        'right:10px;background:none;border:0;color:#888;font-size:16px;line-height:1;cursor:pointer;' +
+        'padding:0;font-family:inherit;">×</button>' +
+        '<div class="bd-r-title" style="font-weight:bold;color:#FB7299;margin-bottom:8px;padding-right:18px;' +
+        'border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:4px;"></div>' +
+        '<div class="bd-r-body" style="color:rgba(255,255,255,0.8);font-size:12px;margin-bottom:12px;"></div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+        '<button class="bd-r-later" style="background:transparent;border:1px solid #555;color:#aaa;' +
+        'padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;"></button>' +
+        '<button class="bd-r-go" style="background:#FB7299;border:0;color:#fff;padding:4px 14px;' +
+        'border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;"></button>' +
+        '</div>';
+      // Class-based, not index-based: adding the close button changed the
+      // positional order and would put the body text into the title slot.
+      box.querySelector('.bd-r-title').textContent = t.title;
+      box.querySelector('.bd-r-body').textContent = t.body;
+      const later = box.querySelector('.bd-r-later');
+      const go = box.querySelector('.bd-r-go');
+      later.textContent = t.later;
+      go.textContent = t.rate;
+
+      const dismiss = (rated) => {
+        try { box.remove(); } catch (_) {}
+        // Either way the invitation never appears again.
+        window.dispatchEvent(new CustomEvent('BILI_RATING_DISMISS', { detail: { rated: !!rated } }));
+      };
+      box.querySelector('.bd-r-close').onclick = () => dismiss(false);
+      later.onclick = () => dismiss(false);
+      go.onclick = () => {
+        try { window.open(reviewUrl || REVIEW_URLS[0], '_blank', 'noopener'); } catch (_) {}
+        dismiss(true);
+      };
+      // Mount hidden so we can measure the real card height, then lift it above
+      // the overlay by exactly that much. Fixes the en/zh height difference.
+      box.style.visibility = 'hidden';
+      document.body.appendChild(box);
+      try {
+        const overlayEl = document.getElementById('bili-download-overlay');
+        if (overlayEl) {
+          // Copy the overlay's real width. min-width/max-width alone leave the
+          // card sized by its own content, so the two would differ by tens of
+          // pixels when shown together.
+          const ow = overlayEl.offsetWidth;
+          if (ow > 0) {
+            box.style.width = ow + 'px';
+            box.style.minWidth = '0';
+            box.style.maxWidth = 'none';
+          }
+          // overlay occupies bottom:16px plus its own height; clear it entirely.
+          box.style.bottom = (16 + overlayEl.offsetHeight + 16) + 'px';
+        }
+      } catch (_) {}
+      box.style.visibility = 'visible';
+      // Once the download overlay has auto-removed itself (~5s), drop the card
+      // back to the normal corner position so it doesn't float mid-screen.
+      setTimeout(() => {
+        try {
+          if (!document.getElementById('bd-review-toast')) return;
+          if (!document.getElementById('bili-download-overlay')) box.style.bottom = '16px';
+        } catch (_) {}
+      }, 5600);
+      // Stays until the user acts: closing it is what records "seen", so an
+      // auto-dismiss would silently consume the one-time invitation.
     };
 
     // Fetch URL(s) into blob with progress
@@ -2208,6 +2345,7 @@
       const failList = failedNames.slice(0, 5).join('、') + (failedNames.length > 5 ? '…' : '');
       overlay.setDetail(fail === 0 ? `${ok}/${selected.length}` : `${ok}/${selected.length} (${fail} ${T.batchEpFail}: ${failList})`);
       overlay.done();
+      if (ok > 0) maybeInviteReview();
     };
 
     // ============================================================

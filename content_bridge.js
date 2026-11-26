@@ -73,3 +73,56 @@ window.addEventListener("BILI_TRIGGER_FFMPEG", (e) => {
         window.dispatchEvent(new CustomEvent("BILI_FFMPEG_RESPONSE", { detail: { requestId, success: false, error: err.message } }));
     }
 });
+
+// ============================================================
+// Review invitation state
+// content_merge.js (MAIN world) has no chrome.* access, so the
+// counter and the "already shown" flag live here and are read via
+// CustomEvents. Policy: invite at most once, after 3 successful
+// downloads, never in exchange for anything.
+// ============================================================
+const RATING_KEY = 'bd_rating_prompt';
+const RATING_MIN_DOWNLOADS = 3;
+
+// The bridge is re-injected on every download (popup.js and the service
+// worker both call executeScript with this file). Without this guard each
+// download would add another pair of listeners, so one BILI_RATING_CHECK
+// would bump the counter N times and the user would be invited far too early.
+if (!window.__BILI_BRIDGE_RATING_BOUND__) {
+  window.__BILI_BRIDGE_RATING_BOUND__ = true;
+
+  window.addEventListener("BILI_RATING_CHECK", (e) => {
+  const requestId = e.detail && e.detail.requestId;
+  if (!requestId) return;
+  try {
+    chrome.storage.local.get(RATING_KEY, (items) => {
+      const st = (items && items[RATING_KEY]) || {};
+      if (st.done) {
+        window.dispatchEvent(new CustomEvent("BILI_RATING_STATE", { detail: { requestId, shouldPrompt: false } }));
+        return;
+      }
+      const count = Number(st.count || 0) + 1;
+      const shouldPrompt = count >= RATING_MIN_DOWNLOADS;
+      // Persist immediately: marking done here (not on click) guarantees the
+      // invitation can never appear twice even if the tab closes right after.
+      chrome.storage.local.set({
+        [RATING_KEY]: shouldPrompt ? { count, done: true } : { count, done: false },
+      }, () => {
+        window.dispatchEvent(new CustomEvent("BILI_RATING_STATE", { detail: { requestId, shouldPrompt } }));
+      });
+    });
+  } catch (_) {
+    window.dispatchEvent(new CustomEvent("BILI_RATING_STATE", { detail: { requestId, shouldPrompt: false } }));
+  }
+});
+
+window.addEventListener("BILI_RATING_DISMISS", () => {
+  try {
+    chrome.storage.local.get(RATING_KEY, (items) => {
+      const st = (items && items[RATING_KEY]) || {};
+      chrome.storage.local.set({ [RATING_KEY]: { ...st, count: st.count || RATING_MIN_DOWNLOADS, done: true } });
+    });
+  } catch (_) {}
+});
+
+} // end __BILI_BRIDGE_RATING_BOUND__ guard

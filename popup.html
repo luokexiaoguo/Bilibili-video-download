@@ -26,6 +26,36 @@ button:active{transform:scale(0.98)}
 .foot-tip{margin-bottom:10px;font-size:11px;color:#888;line-height:1.7}
 .foot-btn{display:inline-block;padding:5px 20px;border:1px solid rgba(251,114,153,0.6);border-radius:20px;color:#FB7299;font-size:12px;margin-bottom:10px}
 .foot-btn:hover{background:rgba(251,114,153,0.12);text-decoration:none;color:#FB7299}
+/* ---- 支持开发者（折叠） ---- */
+.sd{margin-bottom:2px}
+.sd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;
+  background:#2d2d2d;border:1px solid #3a3a3a;border-radius:8px;padding:8px 10px;
+  transition:background .15s;list-style:none}
+.sd-head::-webkit-details-marker{display:none}
+.sd-head:hover{background:#343434}
+.sd-title{font-size:11px;color:#bbb;text-align:left}
+.sd-arrow{color:#888;font-size:10px;transition:transform .2s;flex:0 0 auto}
+.sd[open] .sd-arrow{transform:rotate(180deg)}
+.sd-body{padding:10px 2px 0}
+.sd-row{display:flex;gap:10px;align-items:flex-start}
+.sd-qr{width:80px;height:80px;flex:0 0 80px;border-radius:4px;border:1px solid #3a3a3a;background:#fff;display:block}
+.sd-info{flex:1;min-width:0;font-size:10px;line-height:1.7;color:#888;text-align:left}
+.sd-info b{display:block;color:#e0e0e0;font-size:11px;font-weight:600;margin-bottom:2px}
+.sd-info .sd-mail{display:block;color:#FB7299;text-decoration:none;word-break:break-all}
+.sd-info .sd-mail:hover{text-decoration:underline}
+.sd-actions{margin-top:8px;display:flex;gap:8px;justify-content:center}
+/* ---- 相关推荐 ---- */
+.rec{margin-top:10px}
+.rec-title{font-size:10px;color:#666;text-align:left;margin-bottom:5px}
+.rec-link{display:flex;align-items:center;gap:8px;background:#2d2d2d;border:1px solid #3a3a3a;
+  border-radius:8px;padding:8px 10px;text-decoration:none;transition:background .15s}
+.rec-link:hover{background:#343434;text-decoration:none}
+.rec-icon{width:26px;height:26px;flex:0 0 26px;border-radius:6px;background:rgba(251,114,153,.15);
+  color:#FB7299;font-size:13px;display:flex;align-items:center;justify-content:center}
+.rec-text{flex:1;min-width:0;text-align:left}
+.rec-text b{display:block;color:#e0e0e0;font-size:11px;font-weight:600}
+.rec-text span{display:block;color:#888;font-size:9px;line-height:1.4}
+.rec-go{color:#FB7299;font-size:12px;flex:0 0 auto}
 .quality-group{display:flex;gap:8px;margin-bottom:15px}
 .quality-opt{flex:1;position:relative;cursor:pointer}
 .quality-opt input{position:absolute;opacity:0;width:0;height:0}
@@ -69,7 +99,36 @@ button:active{transform:scale(0.98)}
 <div id="msg"></div>
 <div class="footer">
   <div class="foot-tip" data-i18n="footerFeedback">插件制作不易，如果它确实帮到了你，希望能支持一下，让我有动力持续更新！</div>
-  <div><a class="foot-btn" href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer" data-i18n="linkSupport">支持</a></div>
+  <details class="sd" id="supportBlock">
+    <summary class="sd-head">
+      <span class="sd-title" data-i18n="sdTitle">☕ 支持开发者 · 赞赏 / 定制开发</span>
+      <span class="sd-arrow">▾</span>
+    </summary>
+    <div class="sd-body">
+      <div class="sd-row">
+        <img class="sd-qr" src="icons/wechat-reward.png" alt="微信赞赏码">
+        <div class="sd-info">
+          <b data-i18n="sdQrTitle">微信扫码赞赏</b>
+          <span data-i18n="sdServices">各类软件 / 插件定制开发</span><br>
+          <a class="sd-mail" href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a>
+        </div>
+      </div>
+      <div class="sd-actions">
+        <a class="foot-btn" href="https://afdian.com/a/luokexiaoguo" target="_blank" rel="noopener noreferrer" data-i18n="linkSupport">支持</a>
+      </div>
+    </div>
+  </details>
+  <div class="rec">
+    <div class="rec-title" data-i18n="recTitle">相关推荐</div>
+    <a class="rec-link" href="https://ganskills.com/" target="_blank" rel="noopener noreferrer">
+      <span class="rec-icon">⤓</span>
+      <span class="rec-text">
+        <b data-i18n="recName">干卡下载器</b>
+        <span data-i18n="recDesc">Windows 下载工具 · 8 线程加速 · 断点续传</span>
+      </span>
+      <span class="rec-go">→</span>
+    </a>
+  </div>
   <div style="margin-top:2px"><span data-i18n="footerEmail">反馈邮箱：</span><a href="mailto:luokexiaoguo@foxmail.com">luokexiaoguo@foxmail.com</a></div>
 </div>
 <script src="popup.js"></script>
